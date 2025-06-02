@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/sheets
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+  redis:
+    host: localhost
+    port: 6379
+    password: redispass
+    timeout: 2000
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 1
+        max-wait: -1ms
+  data:
+    mongodb:
+      uri: mongodb://mongo:mongopass@localhost:27017/sheets
+      database: sheets
+      auto-index-creation: true
+# Logging
+logging:
+  level:
+    root: INFO
+    org:
+      springframework: INFO
+      jooq: INFO
