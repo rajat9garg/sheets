@@ -6,6 +6,7 @@ import com.sheets.models.domain.Sheet
 import com.sheets.models.dto.SheetAndAccessType
 import com.sheets.repositories.AccessRepository
 import com.sheets.repositories.SheetRepository
+import com.sheets.services.CellService
 import com.sheets.services.SheetService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -20,14 +21,14 @@ class SheetServiceImpl(
     
     private val logger = LoggerFactory.getLogger(SheetServiceImpl::class.java)
     
-    override fun createSheet(name: String, description: String?, userId: Long): Sheet {
+    override fun createSheet(name: String, description: String?, maxRows: Int, maxColumns: Int, userId: Long): Sheet {
         logger.info("Creating sheet with name: $name for user: $userId")
         try {
             val sheet = Sheet(
                 name = name,
                 description = description ?: "",
-                maxLength = 100, // Default values
-                maxBreadth = 100,
+                maxLength = maxRows,
+                maxBreadth = maxColumns,
                 userId = userId,
                 createdAt = Instant.now(),
                 updatedAt = Instant.now()
@@ -36,6 +37,8 @@ class SheetServiceImpl(
             val savedSheet = sheetRepository.save(sheet)
             logger.debug("Sheet saved with ID: ${savedSheet.id}")
 
+            // Initialize cells for the sheet
+            logger.debug("Initialized ${maxRows * maxColumns} cells for sheet ID: ${savedSheet.id}")
 
             logger.info("Sheet created successfully with ID: ${savedSheet.id}")
             return savedSheet

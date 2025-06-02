@@ -29,7 +29,9 @@ class SheetController(private val sheetService: SheetService) : SheetApi {
             val createdSheet = sheetService.createSheet(
                 sheet.name,
                 sheet.description,
-                xUserId
+                maxRows = createSheetRequest.maxRows ?: 100,
+                maxColumns = createSheetRequest.maxColumns ?: 100,
+                userId = xUserId
             )
             
             logger.info("Sheet created successfully with ID: ${createdSheet.id}")

@@ -18,8 +18,8 @@ object SheetMapper {
         return Sheet(
             name = request.name,
             description = request.description ?: "",
-            maxLength = request.maxLength ?: 100,
-            maxBreadth = request.maxBreadth ?: 100,
+            maxLength = request.maxRows,
+            maxBreadth = request.maxColumns,
             userId = userId,
             createdAt = Instant.now(),
             updatedAt = Instant.now()

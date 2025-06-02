@@ -31,6 +31,15 @@ TASK3
 
 Task4
 - CREATE CELL Domain model and tables in mongoDB
-- CREATE CELL Repository with interfacees
+- CREATE CELL Repository with interfaces
 - CREATE CELL Controller using OPEN API only
-- Implement Expression evaludation for 
+- Change create sheet api whenever a sheet is created the required number of cells
+
+- Update cell flow
+  - identify the value in the update api body if this is an expression or not expression starts with "="
+  - parse the expression to generate the dependencies list
+  - take a lock on the dependencies using redis and then update the cell data in redis
+  - update the data in the redis cache
+
+
+lock free datastructure
