@@ -15,7 +15,6 @@ import com.sheets.services.expression.exception.CircularDependencyException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Instant
-import java.util.concurrent.CompletableFuture
 
 @Service
 class CellServiceImpl(
@@ -331,7 +330,8 @@ class CellServiceImpl(
         // Check for circular dependencies
         logger.debug("Checking for circular dependencies")
         val dependencyMap = buildDependencyMap(sheetId, dependencies)
-        val cycle = circularDependencyDetector.detectCircularDependency("$sheetId:${data}", dependencyMap)
+        val cellId = "$sheetId:${data}" // This is not a valid cell ID, but we need something for circular dependency detection
+        val cycle = circularDependencyDetector.detectCircularDependency(cellId, dependencyMap)
         
         if (cycle != null) {
             val pathStr = cycle.joinToString(" -> ")
@@ -384,52 +384,110 @@ class CellServiceImpl(
     }
 
     /**
+     * Evaluate an expression and update dependencies
+     */
+    fun evaluateExpression(cellId: String, expression: String, userId: String): String {
+        logger.info("Evaluating expression for cell: {}", cellId)
+        
+        val parts = cellId.split(":")
+        if (parts.size < 3) {
+            throw IllegalArgumentException("Invalid cell ID format: $cellId")
+        }
+        
+        val sheetId = parts[0].toLong()
+        val now = Instant.now()
+        
+        try {
+            // Process the expression
+            val (dataType, evaluatedValue, dependencies) = processExpression(expression, sheetId)
+            
+            // Update dependencies in the database
+            logger.debug("Updating dependencies for cell: {}", cellId)
+            cellDependencyService.deleteBySourceCellId(cellId)
+            
+            if (dependencies.isNotEmpty()) {
+                logger.debug("Creating {} new dependencies for cell: {}", dependencies.size, cellId)
+                val cellDependencies = dependencies.map { targetCellId ->
+                    CellDependency(
+                        sheetId = sheetId,
+                        sourceCellId = cellId,
+                        targetCellId = targetCellId,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                }
+                cellDependencyService.createDependencies(cellDependencies)
+            }
+            
+            return evaluatedValue
+        } catch (e: Exception) {
+            logger.error("Error evaluating expression for cell: {} - {}: {}", cellId, e.javaClass.simpleName, e.message, e)
+            throw e
+        }
+    }
+
+    /**
      * Update dependent cells synchronously
      */
     private fun updateDependentCellsSync(cellId: String, userId: String) {
         logger.info("Updating dependent cells synchronously for cell: {}", cellId)
         
-        val dependentCells = cellDependencyService.getDependenciesByTargetCellId(cellId)
-            .map { it.sourceCellId }
-        
-        if (dependentCells.isEmpty()) {
-            logger.info("No dependent cells found for cell: {}", cellId)
-            return
-        }
-        
-        logger.info("Found {} dependent cells for cell: {}", dependentCells.size, cellId)
-        
-        for (dependentCellId in dependentCells) {
-            try {
-                logger.info("Updating dependent cell: {}", dependentCellId)
-                val dependentCell = getCell(dependentCellId)
+        try {
+            // Get cells that depend on this cell
+            val dependentCellIds = cellDependencyService.getDependenciesByTargetCellId(cellId)
+                .map { it.sourceCellId }
+            
+            if (dependentCellIds.isEmpty()) {
+                logger.debug("No dependent cells found for cell: {}", cellId)
+                return
+            }
+            
+            logger.info("Found {} dependent cells for cell: {}", dependentCellIds.size, cellId)
+            
+            // Update each dependent cell
+            for (dependentCellId in dependentCellIds) {
+                logger.debug("Updating dependent cell: {}", dependentCellId)
                 
-                if (dependentCell != null) {
-                    // Process the expression to get the updated evaluated value
-                    val (dataType, evaluatedValue, dependencies) = processExpression(dependentCell.data, dependentCell.sheetId)
+                // Get the dependent cell
+                val dependentCell = getCell(dependentCellId)
+                if (dependentCell == null) {
+                    logger.warn("Dependent cell not found: {}", dependentCellId)
+                    continue
+                }
+                
+                // Only update if it's an expression
+                if (dependentCell.dataType != DataType.EXPRESSION) {
+                    logger.debug("Dependent cell is not an expression, skipping: {}", dependentCellId)
+                    continue
+                }
+                
+                try {
+                    // Re-evaluate the expression
+                    val evaluatedValue = evaluateExpression(dependentCellId, dependentCell.data, userId)
                     
-                    // Update the cell with new evaluated value
+                    // Update the cell
                     val updatedCell = dependentCell.copy(
-                        dataType = dataType,
                         evaluatedValue = evaluatedValue,
                         updatedAt = Instant.now()
                     )
                     
-                    // Save to Redis immediately
-                    logger.info("Saving updated dependent cell to Redis: {}", dependentCellId)
+                    // Save to Redis
+                    logger.debug("Saving updated dependent cell to Redis: {}", dependentCellId)
                     cellRedisRepository.saveCell(updatedCell)
                     
                     // Save to MongoDB asynchronously
-                    logger.info("Saving updated dependent cell to MongoDB asynchronously: {}", dependentCellId)
+                    logger.debug("Saving updated dependent cell to MongoDB asynchronously: {}", dependentCellId)
                     cellAsyncService.saveCell(updatedCell)
                     
-                    // Recursively update cells that depend on this dependent cell
-                    logger.info("Recursively updating cells dependent on: {}", dependentCellId)
-                    updateDependentCellsSync(dependentCellId, userId)
+                    logger.info("Successfully updated dependent cell: {}", dependentCellId)
+                } catch (e: Exception) {
+                    logger.error("Error updating dependent cell: {} - {}: {}", dependentCellId, e.javaClass.simpleName, e.message, e)
+                    // Continue with other dependent cells
                 }
-            } catch (e: Exception) {
-                logger.error("Error updating dependent cell: {} - {}: {}", dependentCellId, e.javaClass.simpleName, e.message, e)
             }
+        } catch (e: Exception) {
+            logger.error("Error updating dependent cells for cell: {} - {}: {}", cellId, e.javaClass.simpleName, e.message, e)
+            throw e
         }
     }
 
@@ -439,50 +497,65 @@ class CellServiceImpl(
     private fun updateDependentCellsAsync(cellId: String, userId: String) {
         logger.info("Updating dependent cells asynchronously for cell: {}", cellId)
         
-        val dependentCells = cellDependencyService.getDependenciesByTargetCellId(cellId)
-            .map { it.sourceCellId }
-        
-        if (dependentCells.isEmpty()) {
-            logger.info("No dependent cells found for cell: {}", cellId)
-            return
-        }
-        
-        logger.info("Found {} dependent cells for cell: {}", dependentCells.size, cellId)
-        
-        CompletableFuture.runAsync {
-            for (dependentCellId in dependentCells) {
+        try {
+            // Get cells that depend on this cell
+            val dependentCellIds = cellDependencyService.getDependenciesByTargetCellId(cellId)
+                .map { it.sourceCellId }
+            
+            if (dependentCellIds.isEmpty()) {
+                logger.debug("No dependent cells found for cell: {}", cellId)
+                return
+            }
+            
+            logger.info("Found {} dependent cells for cell: {}", dependentCellIds.size, cellId)
+            
+            // Update each dependent cell
+            for (dependentCellId in dependentCellIds) {
+                logger.debug("Updating dependent cell: {}", dependentCellId)
+                
+                // Get the dependent cell
+                val dependentCell = getCell(dependentCellId)
+                if (dependentCell == null) {
+                    logger.warn("Dependent cell not found: {}", dependentCellId)
+                    continue
+                }
+                
+                // Only update if it's an expression
+                if (dependentCell.dataType != DataType.EXPRESSION) {
+                    logger.debug("Dependent cell is not an expression, skipping: {}", dependentCellId)
+                    continue
+                }
+                
                 try {
-                    logger.info("Updating dependent cell asynchronously: {}", dependentCellId)
-                    val dependentCell = getCell(dependentCellId)
+                    // Re-evaluate the expression
+                    val evaluatedValue = evaluateExpression(dependentCellId, dependentCell.data, userId)
                     
-                    if (dependentCell != null) {
-                        // Process the expression to get the updated evaluated value
-                        val (dataType, evaluatedValue, dependencies) = processExpression(dependentCell.data, dependentCell.sheetId)
-                        
-                        // Update the cell with new evaluated value
-                        val updatedCell = dependentCell.copy(
-                            dataType = dataType,
-                            evaluatedValue = evaluatedValue,
-                            updatedAt = Instant.now()
-                        )
-                        
-                        // Save to Redis immediately
-                        logger.info("Saving updated dependent cell to Redis: {}", dependentCellId)
-                        cellRedisRepository.saveCell(updatedCell)
-                        
-                        // Save to MongoDB asynchronously
-                        logger.info("Saving updated dependent cell to MongoDB asynchronously: {}", dependentCellId)
-                        cellAsyncService.saveCell(updatedCell)
-                        
-                        // Recursively update cells that depend on this dependent cell
-                        logger.info("Recursively updating cells dependent on: {}", dependentCellId)
-                        updateDependentCellsAsync(dependentCellId, userId)
-                    }
+                    // Update the cell
+                    val updatedCell = dependentCell.copy(
+                        evaluatedValue = evaluatedValue,
+                        updatedAt = Instant.now()
+                    )
+                    
+                    // Save to Redis
+                    logger.debug("Saving updated dependent cell to Redis: {}", dependentCellId)
+                    cellRedisRepository.saveCell(updatedCell)
+                    
+                    // Save to MongoDB asynchronously
+                    logger.debug("Saving updated dependent cell to MongoDB asynchronously: {}", dependentCellId)
+                    cellAsyncService.saveCell(updatedCell)
+                    
+                    logger.info("Successfully updated dependent cell: {}", dependentCellId)
+                    
+                    // Recursively update cells that depend on this cell
+                    updateDependentCellsAsync(dependentCellId, userId)
                 } catch (e: Exception) {
-                    logger.error("Error updating dependent cell asynchronously: {} - {}: {}", 
-                        dependentCellId, e.javaClass.simpleName, e.message, e)
+                    logger.error("Error updating dependent cell: {} - {}: {}", dependentCellId, e.javaClass.simpleName, e.message, e)
+                    // Continue with other dependent cells
                 }
             }
+        } catch (e: Exception) {
+            logger.error("Error updating dependent cells for cell: {} - {}: {}", cellId, e.javaClass.simpleName, e.message, e)
+            // Don't rethrow in async method
         }
     }
 }

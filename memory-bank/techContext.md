@@ -20,13 +20,17 @@
 ## Technology Stack
 ### Core Technologies
 - **Backend Framework:** Spring Boot 3.5.0
-- **Database:** PostgreSQL 15.13
+- **Database:** PostgreSQL 15.13, MongoDB 6.0, Redis 7.0
 - **Programming Languages:** Kotlin 1.9.25, Java 17
 - **Build Tool:** Gradle 8.13
 
 ### Database & ORM
-- **Database System:** PostgreSQL 15.13 (downgraded from 16.9 for compatibility)
-- **ORM Framework:** JOOQ 3.19.3
+- **Relational Database:** PostgreSQL 15.13 (downgraded from 16.9 for compatibility)
+- **Document Database:** MongoDB 6.0 for cell and dependency storage
+- **Cache:** Redis 7.0 for dependency caching
+- **ORM Framework:** JOOQ 3.19.3 for PostgreSQL
+- **MongoDB Client:** Spring Data MongoDB
+- **Redis Client:** Spring Data Redis with Lettuce
 - **Database Migration:** Flyway 9.16.1
   - Migration Location: `src/main/resources/db/migration`
   - Schema: `public`
@@ -39,6 +43,8 @@
 - **Foreign Key Constraints:** Removed foreign key constraints on `sheets.user_id` and `access_mappings.user_id` to enable development flexibility
 - **ID Type Handling:** Domain models use UUID for IDs while some database tables use BIGINT
 - **Health Check Endpoint:** Implemented at `/api/v1/health` with basic status monitoring
+- **Redis Caching:** Cell dependencies cached with 24-hour TTL
+- **Asynchronous Processing:** Using Spring's @Async for dependent cell updates
 
 #### JOOQ Configuration
 - **Version:** 3.19.3 (OSS Edition)
@@ -57,12 +63,15 @@
 - `org.jooq:jooq:3.19.3` - JOOQ core library
 - `org.postgresql:postgresql:42.6.0` - PostgreSQL JDBC driver
 - `org.flywaydb:flyway-core` - Database migration tool
+- `org.springframework.boot:spring-boot-starter-data-mongodb` - MongoDB integration
+- `org.springframework.boot:spring-boot-starter-data-redis` - Redis integration
+- `io.lettuce:lettuce-core` - Redis client
 - `com.fasterxml.jackson.module:jackson-module-kotlin` - Kotlin support for Jackson
 - `org.slf4j:slf4j-api` - Logging facade
 - `ch.qos.logback:logback-classic` - Logging implementation
 
 ## Database Schema
-### Tables
+### PostgreSQL Tables
 #### users
 - **Primary Key:** `id` (BIGINT)
 - **Columns:**
@@ -112,6 +121,50 @@
 - **Triggers:** 
   - `set_updated_at` - Updates `updated_at` on record update
 
+### MongoDB Collections
+#### cells
+- **Primary Key:** `id` (String, format: "sheetId:cellRef")
+- **Fields:**
+  - `id` - String, Primary Key
+  - `sheetId` - Long
+  - `cellRef` - String (e.g., "A1", "B2")
+  - `data` - String (raw formula or value)
+  - `evaluatedValue` - String (calculated result)
+  - `dataType` - Enum ('STRING', 'NUMBER', 'BOOLEAN', 'ERROR', 'FORMULA')
+  - `created_at` - Date
+  - `updated_at` - Date
+- **Indexes:**
+  - Primary key on `id`
+  - Index on `sheetId`
+
+#### cell_dependencies
+- **Primary Key:** `id` (String)
+- **Fields:**
+  - `id` - String, Primary Key
+  - `sourceCellId` - String (cell that depends on another)
+  - `targetCellId` - String (cell being depended on)
+  - `sheetId` - Long
+  - `created_at` - Date
+- **Indexes:**
+  - Primary key on `id`
+  - Index on `sourceCellId`
+  - Index on `targetCellId`
+  - Index on `sheetId`
+  - Compound index on (`sourceCellId`, `targetCellId`)
+
+### Redis Cache
+#### Key Patterns
+- **Dependency Key:** `dependency:{sourceCellId}:{targetCellId}`
+- **Source Dependencies Set:** `source:dependencies:{sourceCellId}`
+- **Target Dependencies Set:** `target:dependencies:{targetCellId}`
+- **Sheet Dependencies Set:** `sheet:dependencies:{sheetId}`
+
+#### TTL Settings
+- **Default TTL:** 24 hours for all cache entries
+- **Key Types:**
+  - String values for individual dependencies
+  - Set values for dependency collections
+
 ### Custom Types
 #### access_type
 - **Type:** ENUM
@@ -132,11 +185,13 @@
 - JDK 17
 - Docker and Docker Compose
 - PostgreSQL 15.13
+- MongoDB 6.0
+- Redis 7.0
 - Gradle 8.13
 
 ### Setup Instructions
 1. Clone the repository
-2. Start PostgreSQL database:
+2. Start database services:
    ```bash
    docker-compose up -d
    ```
@@ -152,12 +207,22 @@
 ### Configuration
 #### Environment Variables
 ```
-# Database
+# PostgreSQL Database
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=sheets
 DB_USER=postgres
 DB_PASSWORD=postgres
+
+# MongoDB
+MONGO_URI=mongodb://mongo:mongopass@localhost:27017/sheets?authSource=admin
+MONGO_DATABASE=sheets
+
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=redispass
+REDIS_DATABASE=0
 
 # Application
 SERVER_PORT=8080
@@ -183,6 +248,8 @@ java -jar build/libs/sheets-0.0.1-SNAPSHOT.jar
 ## Infrastructure
 ### Development
 - Local PostgreSQL 15.13 database via Docker
+- Local MongoDB 6.0 database via Docker
+- Local Redis 7.0 cache via Docker
 - Spring Boot embedded Tomcat server
 
 ### Staging/Production
@@ -199,37 +266,52 @@ java -jar build/libs/sheets-0.0.1-SNAPSHOT.jar
 2. Make changes and commit with descriptive messages
 3. Push and create pull request
 4. Address review comments
-5. Merge after approval
+5. Merge to `main` after approval
 
 ## Testing Strategy
-### Unit Tests
-- JUnit 5 for unit testing
-- MockK for mocking in Kotlin tests
-- Repository and service layer unit tests
+### Unit Testing
+- JUnit 5 for unit tests
+- MockK for mocking in Kotlin
+- Test coverage target: 80%
 
-### Integration Tests
-- Spring Boot Test for integration testing
-- Test containers for database tests
-- API endpoint testing
+### Integration Testing
+- Spring Boot Test for integration tests
+- TestContainers for database tests
+- API tests with RestAssured
+
+### Performance Testing
+- JMeter for load testing
+- Focus on cell dependency update performance
+- Redis cache hit rate monitoring
 
 ## Monitoring & Logging
-### Application Logs
-- SLF4J with Logback for logging
-- Log levels: ERROR, WARN, INFO, DEBUG
-- Detailed logging in repository and service layers
+### Logging
+- SLF4J with Logback
+- Log levels:
+  - INFO for production
+  - DEBUG for development
+- Structured logging format:
+  ```
+  %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n
+  ```
 
-### Health Checks
+### Metrics
+- Spring Boot Actuator for basic metrics
 - Health check endpoint at `/api/v1/health`
-- Basic application status monitoring
+- Custom metrics for:
+  - Cell update response time
+  - Redis cache hit rate
+  - Circular dependency detection time
 
 ## Security Considerations
-### Authentication
-- No authentication implemented (development environment)
-- User ID provided in headers without verification
+### Authentication & Authorization
+- Not yet implemented
 
 ### Data Protection
-- No sensitive data handling implemented yet
+- No sensitive data stored
+- Redis password protection
+- MongoDB authentication
 
-### Dependencies
-- Regular dependency updates via Gradle
-- Vulnerability scanning not yet implemented
+### API Security
+- Basic input validation
+- No rate limiting yet

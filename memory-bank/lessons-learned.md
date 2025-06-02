@@ -1,9 +1,9 @@
 # Lessons Learned
 
 **Created:** 2025-05-24  
-**Last Updated:** 2025-06-02  
+**Last Updated:** 2025-06-05  
 **Last Updated By:** Cascade AI Assistant  
-**Related Components:** Database, ORM, PostgreSQL, Flyway, Repository Implementation
+**Related Components:** Database, ORM, PostgreSQL, Flyway, Repository Implementation, MongoDB, Redis, Cell Dependencies
 
 ## Database & ORM Configuration
 
@@ -169,6 +169,218 @@
    - **Lesson:** Services should degrade gracefully when dependent features are unavailable
    - **Solution:** Temporarily replaced `OWNER` access type with `READ` for owned sheets
    - **Best Practice:** Implement fallback behavior that maintains core functionality when possible
+
+## Cell Dependency Management
+
+### Dual Storage Strategy
+1. **MongoDB and Redis Integration**
+   - **Lesson:** Using dual storage with MongoDB for persistence and Redis for caching provides optimal performance
+   - **Solution:** Implemented CellDependencyService with MongoDB repository for persistence and Redis repository for caching
+   - **Best Practice:** Follow the cache-aside pattern where Redis serves as cache and MongoDB as source of truth
+   - **Example:**
+     ```kotlin
+     override fun getDependenciesBySourceCellId(sourceCellId: String): List<CellDependency> {
+         // Try cache first
+         val cachedDependencies = cellDependencyRedisRepository.getDependenciesBySourceCellId(sourceCellId)
+         if (cachedDependencies.isNotEmpty()) {
+             return cachedDependencies
+         }
+         
+         // Fall back to MongoDB if cache miss
+         val dependencies = cellDependencyRepository.findBySourceCellId(sourceCellId)
+         
+         // Populate cache for future requests
+         if (dependencies.isNotEmpty()) {
+             cellDependencyRedisRepository.saveDependencies(dependencies)
+         }
+         
+         return dependencies
+     }
+     ```
+
+2. **Cache Invalidation Strategy**
+   - **Lesson:** Cache invalidation is critical for maintaining data consistency
+   - **Problem:** Stale cache entries can lead to incorrect formula evaluation
+   - **Solution:** Implemented TTL-based expiration (24 hours) and explicit invalidation on updates
+   - **Best Practice:** Use a combination of TTL and explicit invalidation for optimal cache freshness
+
+3. **Batch Operations**
+   - **Lesson:** Batch operations significantly improve performance for bulk dependency updates
+   - **Solution:** Implemented batch methods for creating and deleting dependencies
+   - **Best Practice:** Use Redis pipelining and MongoDB bulk operations for efficient batch processing
+
+### Redis Caching Implementation
+
+1. **Key Design Patterns**
+   - **Lesson:** Well-designed Redis keys are essential for efficient lookups
+   - **Solution:** Implemented structured key patterns for different dependency relationships
+   - **Best Practice:** Use consistent key naming conventions with colons as separators
+   - **Example:**
+     ```
+     dependency:{sourceCellId}:{targetCellId} -> Individual dependency
+     source:dependencies:{sourceCellId} -> Set of all dependencies for a source cell
+     target:dependencies:{targetCellId} -> Set of all dependencies for a target cell
+     sheet:dependencies:{sheetId} -> Set of all dependencies in a sheet
+     ```
+
+2. **TTL Configuration**
+   - **Lesson:** TTL settings need to balance cache freshness with hit rate
+   - **Problem:** Fixed TTL may not be optimal for all usage patterns
+   - **Solution:** Implemented 24-hour TTL with plans to refine based on usage patterns
+   - **Best Practice:** Monitor cache hit rates and adjust TTL accordingly
+
+3. **Error Handling in Redis Operations**
+   - **Lesson:** Redis operations can fail due to connectivity issues or memory constraints
+   - **Solution:** Implemented robust error handling with fallback to MongoDB
+   - **Best Practice:** Always catch Redis exceptions and gracefully degrade to primary data source
+   - **Example:**
+     ```kotlin
+     try {
+         return redisTemplate.opsForValue().get(key)
+     } catch (e: Exception) {
+         logger.error("Failed to retrieve from Redis: ${e.message}")
+         return null
+     }
+     ```
+
+4. **Connection Pool Management**
+   - **Lesson:** Redis connection pool settings significantly impact performance
+   - **Solution:** Configured connection pool with appropriate timeouts and max connections
+   - **Best Practice:** Tune connection pool settings based on load testing results
+
+### Circular Dependency Detection
+
+1. **Depth-First Search Algorithm**
+   - **Lesson:** DFS is efficient for detecting cycles in dependency graphs
+   - **Solution:** Implemented DFS with visited and recursion stacks
+   - **Best Practice:** Optimize for both correctness and performance
+   - **Example:**
+     ```kotlin
+     private fun detectCircularDependency(
+         sourceCellId: String,
+         targetCellId: String,
+         visited: MutableSet<String>,
+         recursionStack: MutableSet<String>
+     ): Boolean {
+         if (recursionStack.contains(targetCellId)) {
+             return true // Circular dependency detected
+         }
+         
+         if (visited.contains(targetCellId)) {
+             return false // Already checked, no circular dependency
+         }
+         
+         visited.add(targetCellId)
+         recursionStack.add(targetCellId)
+         
+         val dependencies = getDependenciesBySourceCellId(targetCellId)
+         for (dependency in dependencies) {
+             if (detectCircularDependency(sourceCellId, dependency.targetCellId, visited, recursionStack)) {
+                 return true
+             }
+         }
+         
+         recursionStack.remove(targetCellId)
+         return false
+     }
+     ```
+
+2. **Performance Optimization**
+   - **Lesson:** Circular dependency detection can be expensive for large dependency graphs
+   - **Solution:** Implemented caching of dependency maps and early termination
+   - **Best Practice:** Use memoization to avoid redundant calculations
+
+3. **Error Reporting**
+   - **Lesson:** Clear error messages are essential for debugging circular dependencies
+   - **Solution:** Implemented detailed error messages with dependency path information
+   - **Best Practice:** Include the complete dependency cycle in error messages
+
+### Asynchronous Cell Updates
+
+1. **Spring @Async Configuration**
+   - **Lesson:** Proper thread pool configuration is critical for @Async performance
+   - **Solution:** Configured dedicated thread pool with appropriate size and queue capacity
+   - **Best Practice:** Size thread pool based on available CPU cores and expected workload
+   - **Example:**
+     ```kotlin
+     @Configuration
+     @EnableAsync
+     class AsyncConfig {
+         @Bean(name = ["taskExecutor"])
+         fun taskExecutor(): Executor {
+             val executor = ThreadPoolTaskExecutor()
+             executor.corePoolSize = 5
+             executor.maxPoolSize = 10
+             executor.queueCapacity = 25
+             executor.setThreadNamePrefix("CellUpdater-")
+             executor.initialize()
+             return executor
+         }
+     }
+     ```
+
+2. **Error Handling in Async Methods**
+   - **Lesson:** Error handling in async methods requires special attention
+   - **Problem:** Exceptions in @Async methods are lost if not properly handled
+   - **Solution:** Implemented AsyncUncaughtExceptionHandler and detailed logging
+   - **Best Practice:** Use CompletableFuture for better error handling in async operations
+
+3. **Deadlock Prevention**
+   - **Lesson:** Async operations on interdependent cells can cause deadlocks
+   - **Solution:** Implemented ordered processing based on dependency graph topology
+   - **Best Practice:** Process cells in topological order to prevent deadlocks
+
+## MongoDB Integration
+
+1. **Document Design for Cells**
+   - **Lesson:** Document design significantly impacts query performance
+   - **Solution:** Designed cell documents with composite IDs and appropriate indexing
+   - **Best Practice:** Use compound indexes for frequently queried fields
+   - **Example:**
+     ```kotlin
+     @Document(collection = "cells")
+     data class CellDocument(
+         @Id val id: String, // Format: "sheetId:cellRef"
+         val sheetId: Long,
+         val cellRef: String,
+         val data: String,
+         val evaluatedValue: String,
+         val dataType: CellDataType,
+         val createdAt: Date,
+         val updatedAt: Date
+     )
+     
+     // Indexes
+     @Indexed(direction = IndexDirection.ASCENDING)
+     val sheetId: Long
+     ```
+
+2. **Index Strategy**
+   - **Lesson:** Proper indexing is critical for MongoDB performance
+   - **Solution:** Created indexes on `sourceCellId`, `targetCellId`, and compound index on both
+   - **Best Practice:** Monitor query performance and adjust indexes accordingly
+
+3. **Batch Operations**
+   - **Lesson:** Batch operations significantly improve MongoDB performance
+   - **Solution:** Implemented bulk write operations for dependency updates
+   - **Best Practice:** Use BulkOperations for multiple document operations
+
+## Formula Evaluation
+
+1. **Expression Parsing**
+   - **Lesson:** Robust formula parsing requires careful error handling
+   - **Solution:** Implemented detailed error reporting for formula parsing errors
+   - **Best Practice:** Provide clear error messages with position information
+
+2. **Dependency Tracking**
+   - **Lesson:** Accurate dependency tracking is essential for formula evaluation
+   - **Solution:** Implemented dependency extraction during formula parsing
+   - **Best Practice:** Update dependencies whenever formulas change
+
+3. **Evaluation Performance**
+   - **Lesson:** Formula evaluation can be performance-intensive
+   - **Solution:** Implemented caching of intermediate results and asynchronous updates
+   - **Best Practice:** Use a combination of caching and async processing for optimal performance
 
 ## Best Practices
 
