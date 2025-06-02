@@ -140,59 +140,56 @@ class CellController(
             }
             
             try {
-                // Get existing cell
-                logger.debug("Retrieving existing cell with ID: {}", cellId)
-                val existingCell = cellService.getCell(cellId) ?: run {
-                    logger.warn("Cell not found with ID: {}", cellId)
+                // Parse the cell ID to get row and column
+                val parts = cellId.split(":")
+                if (parts.size != 3) {
+                    logger.warn("Invalid cell ID format: {}", cellId)
                     return ResponseEntity
-                        .status(HttpStatus.NOT_FOUND)
+                        .status(HttpStatus.BAD_REQUEST)
                         .body(null)
                 }
+                
+                try {
+                    val row = parts[1].toInt()
+                    val column = parts[2].toInt()
                     
-                // Update the cell
-                logger.debug("Updating cell with ID: {}", cellId)
-                val updatedCell = cellService.updateCell(
-                    existingCell.copy(
-                        data = cellValue
-                    ),
-                    xUserID.toString()
-                )
-                
-                // Convert to response
-                val response = toCellResponse(updatedCell)
-                logger.info("Successfully updated cell with ID: {} in sheet: {} by user: {}", 
-                    cellId, sheetId, xUserID)
-                
-                return ResponseEntity.ok(response)
-            } catch (e: CircularDependencyException) {
-                logger.error("Circular dependency detected while updating cell with ID: {} in sheet: {} by user: {}: {}", 
-                    cellId, sheetId, xUserID, e.message)
-                return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body(null)
-            } catch (e: ExpressionException) {
-                logger.error("Expression error while updating cell with ID: {} in sheet: {} by user: {}: {}", 
-                    cellId, sheetId, xUserID, e.message)
-                return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body(null)
-            } catch (e: IllegalStateException) {
-                // This is likely a locking issue
-                logger.error("Lock acquisition failed while updating cell with ID: {} in sheet: {} by user: {}: {}", 
-                    cellId, sheetId, xUserID, e.message)
-                return ResponseEntity
-                    .status(HttpStatus.CONFLICT)
-                    .body(null)
+                    // Create a cell object with the provided data
+                    val cell = Cell(
+                        id = cellId,
+                        sheetId = sheetId,
+                        row = row,
+                        column = column,
+                        data = cellValue,
+                        dataType = DataType.PRIMITIVE, // This will be determined by the service
+                        evaluatedValue = "",           // This will be determined by the service
+                        createdAt = Instant.now(),     // This will be overridden if cell exists
+                        updatedAt = Instant.now()
+                    )
+                    
+                    // Let the service handle cell existence check and creation/update
+                    logger.debug("Sending cell to service for update: {}", cellId)
+                    val updatedCell = cellService.updateCell(cell, xUserID.toString())
+                    
+                    // Convert to response
+                    val response = toCellResponse(updatedCell)
+                    logger.info("Successfully updated cell with ID: {} in sheet: {} by user: {}", 
+                        cellId, sheetId, xUserID)
+                    
+                    return ResponseEntity.ok(response)
+                } catch (e: NumberFormatException) {
+                    logger.warn("Invalid row or column in cell ID: {}", cellId)
+                    return ResponseEntity
+                        .status(HttpStatus.BAD_REQUEST)
+                        .body(null)
+                }
             } catch (e: Exception) {
-                logger.error("Unexpected error while updating cell with ID: {} in sheet: {} by user: {}: {}", 
-                    cellId, sheetId, xUserID, e.message, e)
+                logger.error("Error updating cell: {}", e.message, e)
                 return ResponseEntity
                     .status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(null)
             }
         } catch (e: Exception) {
-            logger.error("Error validating sheet access for sheet: {} and user: {}: {}", 
-                sheetId, xUserID, e.message, e)
+            logger.error("Error updating cell: {}", e.message, e)
             return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(null)

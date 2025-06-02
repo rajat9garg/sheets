@@ -188,6 +188,7 @@ class CellServiceImpl(
             allCellsToLock.addAll(dependencies)
             
             // Try to acquire locks on all cells
+            // TODO take lock on sheet for taking lock on the cell
             logger.debug("Attempting to acquire locks on {} cells", allCellsToLock.size)
             val lockedCells = mutableListOf<String>()
             try {
