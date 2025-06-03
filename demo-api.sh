@@ -211,13 +211,6 @@ echo "$CONCURRENT_2"
 
 print_expected "In a true concurrent scenario, one request would succeed and the other might return a 409 Conflict"
 
-# 18. Clean up - Delete the sheet
-print_header "18. Cleaning up - Deleting the sheet"
-print_command "curl -s -X DELETE ${BASE_URL}/sheet/${SHEET_ID} -H \"X-User-ID: ${USER_ID}\""
-DELETE_SHEET_RESPONSE=$(curl -s -X DELETE "${BASE_URL}/sheet/${SHEET_ID}" -H "X-User-ID: ${USER_ID}")
-echo "$DELETE_SHEET_RESPONSE"
-
-print_expected "Sheet deleted successfully"
 
 # Summary
 print_header "Demo Summary"
@@ -230,6 +223,5 @@ echo -e "✅ Complex nested formula evaluation"
 echo -e "✅ Circular dependency detection"
 echo -e "✅ Sheet sharing and permission management"
 echo -e "✅ Concurrent update handling"
-echo -e "✅ Cell deletion and verification"
 
 echo -e "\n${BOLD}${GREEN}Demo completed successfully!${NC}"
