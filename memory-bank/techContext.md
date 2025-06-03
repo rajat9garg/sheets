@@ -3,8 +3,6 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-03
-**Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
 - [Technology Stack](#technology-stack)
@@ -17,6 +15,7 @@
 - [Monitoring & Logging](#monitoring--logging)
 - [Security Considerations](#security-considerations)
 - [Expression Evaluation](#expression-evaluation)
+- [Error Handling](#error-handling)
 
 ## Technology Stack
 ### Core Technologies
@@ -35,6 +34,8 @@
 - **Health Check Endpoint:** Implemented at `/api/v1/health` with basic status monitoring
 - **Redis Caching:** Cell dependencies cached with 24-hour TTL
 - **Asynchronous Processing:** Using Spring's @Async for dependent cell updates
+- **Custom Exception Hierarchy:** Implemented a hierarchy of custom exceptions (e.g., `SheetLockException`, `CircularReferenceException`) for specific error scenarios.
+- **Global Exception Handling:** Centralized error handling via `GlobalExceptionHandler` to provide standardized `ErrorResponse` objects with appropriate HTTP status codes and detailed error information.
 
 ### JOOQ Configuration
 - **Version:** 3.19.3 (OSS Edition)
@@ -322,3 +323,32 @@ java -jar build/libs/sheets-0.0.1-SNAPSHOT.jar
 ### Column Conversion Utilities
 - **Column Letter to Number:** Converts alphabetical column to numeric index
 - **Column Number to Letter:** Converts numeric index to alphabetical column
+
+## Error Handling
+### Custom Exceptions
+- **Base Exception:** `SheetException` serves as the base for all custom exceptions.
+- **Specific Exceptions:**
+  - `ResourceLockException` (and its subclasses `SheetLockException`, `CellLockException`): For concurrency control and resource locking issues.
+  - `CircularReferenceException`: For detecting and handling circular dependencies in cell formulas.
+  - `CellDependencyException`: For issues related to cell dependencies preventing operations.
+  - `PersistenceException`: For errors during data persistence (Redis, MongoDB).
+
+### Global Exception Handler (`GlobalExceptionHandler`)
+- **Purpose:** Provides a centralized mechanism to handle all exceptions thrown within the application.
+- **Functionality:**
+  - Catches custom and standard exceptions.
+  - Maps exceptions to appropriate HTTP status codes (e.g., 409 Conflict, 400 Bad Request).
+  - Formats error responses into a consistent `ErrorResponse` structure, including `status`, `error`, `message`, `timestamp`, and a `details` field for additional context.
+  - Ensures user-friendly error messages are returned to the client.
+
+### Error Response Structure
+- **Model:** Defined in `api.yaml` as `ErrorResponse`
+- **Fields:**
+  - `status`: HTTP status code (e.g., 400, 404, 409, 500)
+  - `error`: Error type (e.g., "Bad Request", "Not Found", "Conflict")
+  - `message`: User-friendly error message
+  - `path`: Request path that triggered the error
+  - `timestamp`: Time when the error occurred
+  - `details`: Additional error details specific to the error type (e.g., resource ID, lock owner, retry information)
+
+This approach significantly improves error clarity, debugging, and client-side error handling capabilities.

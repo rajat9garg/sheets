@@ -3,14 +3,14 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-03
+**Last Modified:** 2025-06-04 00:51
 **Last Updated By:** Cascade AI Assistant
 
 ## Current Status
 ### Overall Progress
 - **Start Date:** 2025-05-24
-- **Current Phase:** Expression Evaluation and Alphabetical Column Notation
-- **Completion Percentage:** 80%
+- **Current Phase:** Error Handling and Custom Exceptions
+- **Completion Percentage:** 85%
 - **Health Status:** Green (all critical features implemented)
 
 ### Key Metrics
@@ -18,14 +18,24 @@
 |--------|---------|--------|--------|
 | Database Schema Coverage | 95% | 100% | ⚠️ |
 | Repository Implementation | 90% | 100% | ⚠️ |
-| Service Layer Implementation | 80% | 100% | ⚠️ |
+| Service Layer Implementation | 85% | 100% | ⚠️ |
 | API Endpoint Implementation | 30% | 100% | ❌ |
 | Cell Dependency Management | 85% | 100% | ⚠️ |
 | Redis Caching Implementation | 90% | 100% | ⚠️ |
 | Formula Evaluation | 90% | 100% | ✅ |
 | Alphabetical Column Support | 100% | 100% | ✅ |
+| **Error Handling** | **100%** | **100%** | **✅** |
 
 ## Recent Accomplishments
+### Error Handling and Custom Exceptions - 2025-06-04
+- ✅ Implemented custom exceptions (`SheetLockException`, `CellLockException`, `CircularReferenceException`, `CellDependencyException`, `PersistenceException`) for specific error scenarios.
+- ✅ Updated `CellUtils.kt` to throw these new custom exceptions instead of generic `IllegalStateException`.
+- ✅ Enhanced `GlobalExceptionHandler.kt` to catch and handle all custom exceptions, providing standardized and detailed error responses.
+- ✅ Ensured `GlobalExceptionHandler` returns appropriate HTTP status codes (e.g., 409 for conflicts, 400 for circular dependencies).
+- ✅ Resolved compilation issues related to class inheritance in `SheetExceptions.kt` by marking `ResourceLockException` as `open`.
+- ✅ Verified successful build of the application with all error handling changes.
+- ✅ Confirmed that the `details` field is already present in the `ErrorResponse` schema in `api.yaml`, supporting enhanced error responses.
+
 ### Alphabetical Column Notation (A1 Style) - 2025-06-03
 - ✅ Completed transition to alphabetical column notation (A1 style) throughout the application
 - ✅ Enhanced ExpressionEvaluatorImpl to properly handle A1 notation in arithmetic expressions
@@ -38,6 +48,18 @@
 - ✅ Created comprehensive test scripts to validate all expression functions
 
 ## Detailed Progress
+### Error Handling and Custom Exceptions
+- **Status:** Complete (100%)
+- **Details:**
+  - Introduced a hierarchy of custom exceptions, inheriting from a base `SheetException`.
+  - Replaced all relevant generic exceptions in `CellUtils.kt` with specific custom exceptions for better error context and clarity.
+  - Implemented robust global exception handling in `GlobalExceptionHandler.kt` to centralize error response generation.
+  - Standardized error responses to include `status`, `error`, `message`, `timestamp`, and a `details` field for additional context.
+  - Configured `GlobalExceptionHandler` to return HTTP 409 for lock conflicts, HTTP 400 for circular dependencies, and other appropriate status codes.
+  - Ensured seamless integration with the existing OpenAPI specification for error response models.
+  - Verified that the OpenAPI specification already includes a `details` field in the `ErrorResponse` schema to support richer error information.
+  - Documented the error handling pattern with Mermaid diagrams for clarity and future reference.
+
 ### Expression Evaluation and Formula Support
 - **Status:** Mostly Complete (90%)
 - **Details:**
@@ -69,13 +91,14 @@
   - Created comprehensive test scripts to validate A1 notation support
 
 ## Sprint Progress
-### Current Sprint: Expression Evaluation Enhancement (2025-06-01 to 2025-06-07)
-- **Planned:** Enhance expression evaluation with A1 notation support
+### Current Sprint: Error Handling and Expression Evaluation Enhancement (2025-06-01 to 2025-06-07)
+- **Planned:** Enhance expression evaluation with A1 notation support and improve error handling.
 - **Completed:** 
   - Enhanced ExpressionEvaluatorImpl for A1 notation
   - Rewrote AverageFunction, MinFunction, and MaxFunction
-  - Created comprehensive test scripts
-- **Velocity:** Ahead of schedule
+  - Created comprehensive test scripts for expression evaluation.
+  - Implemented custom exceptions and global error handling.
+- **Velocity:** On track
 - **Carry Over:** None
 
 ## Upcoming Milestones

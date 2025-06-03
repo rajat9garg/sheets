@@ -97,7 +97,6 @@ class CellLockServiceImpl(
         logger.debug("Attempting to release lock for sheet: {} by user: {}", sheetId, userId)
         
         try {
-            // If the lock owner is null (possibly due to Redis reconnection), allow the release
             if (currentOwner == null || currentOwner == userId) {
                 redisTemplate.delete(lockKey)
                 logger.debug("Lock released for sheet: {} by user: {}", sheetId, userId)
@@ -110,7 +109,6 @@ class CellLockServiceImpl(
         } catch (e: Exception) {
             logger.error("Error releasing lock for sheet: {} by user: {}: {}", 
                 sheetId, userId, e.message, e)
-            // Return false to indicate failure
             return false
         }
     }

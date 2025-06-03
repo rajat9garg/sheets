@@ -3,7 +3,7 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-03
+**Last Modified:** 2025-06-04 00:51
 **Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
@@ -13,6 +13,7 @@
 - [Database Schema](#database-schema)
 - [Repository Pattern Implementation](#repository-pattern-implementation)
 - [Cell Dependency Management](#cell-dependency-management)
+- [Error Handling Pattern](#error-handling-pattern)
 - [Design Decisions](#design-decisions)
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
 - [Scalability Considerations](#scalability-considerations)
@@ -400,6 +401,140 @@ graph TD
     RemoveFromSheetSet --> DeleteKey[Delete Key]
 ```
 
+## Error Handling Pattern
+### Custom Exception Hierarchy
+To provide more granular and meaningful error messages, a custom exception hierarchy has been implemented. All custom exceptions inherit from a base `SheetException`.
+
+```mermaid
+graph TD
+    SheetException --> ResourceLockException
+    ResourceLockException --> SheetLockException
+    ResourceLockException --> CellLockException
+    SheetException --> CircularReferenceException
+    SheetException --> CellDependencyException
+    SheetException --> PersistenceException
+```
+
+- **`SheetException`**: Base abstract class for all application-specific exceptions.
+- **`ResourceLockException`**: Base class for exceptions related to resource locking, including `retryAfterMs` for client guidance.
+- **`SheetLockException`**: Specific exception for conflicts when acquiring a sheet-level lock.
+- **`CellLockException`**: Specific exception for conflicts when acquiring a cell-level lock.
+- **`CircularReferenceException`**: Thrown when a circular dependency is detected in cell formulas.
+- **`CellDependencyException`**: Thrown when an operation (e.g., cell deletion) is blocked due to existing cell dependencies.
+- **`PersistenceException`**: Thrown for errors encountered during data persistence operations (e.g., Redis or MongoDB).
+
+### Global Exception Handling
+All custom exceptions, as well as standard Spring exceptions, are handled centrally by the `GlobalExceptionHandler`. This ensures a consistent error response format across the entire API.
+
+- **Centralized Handling**: A single `@ControllerAdvice` class (`GlobalExceptionHandler`) intercepts all exceptions.
+- **Standardized Response**: Errors are mapped to a consistent `ErrorResponse` model (defined in `api.yaml`), which includes `status`, `error`, `message`, `timestamp`, and a `details` field for additional context.
+- **HTTP Status Mapping**: Exceptions are mapped to appropriate HTTP status codes (e.g., `409 Conflict` for lock errors, `400 Bad Request` for circular dependencies).
+- **User-Friendly Messages**: Error responses include clear, actionable messages for the client.
+
+```mermaid
+graph TD
+    subgraph Application
+        Controller[Controller] --> Service[Service Layer]
+        Service --> Repository[Repository Layer]
+        Repository --> Database[Database/Redis]
+    end
+
+    subgraph Exception Flow
+        Exception[Exception Thrown] --> GlobalExceptionHandler[GlobalExceptionHandler]
+        GlobalExceptionHandler --> ErrorResponse[Standardized ErrorResponse]
+        ErrorResponse --> Client[Client]
+    end
+
+    Controller -- Throws Custom Exceptions --> Exception
+    Service -- Throws Custom Exceptions --> Exception
+    Repository -- Throws Custom Exceptions --> Exception
+```
+
+### Error Response Structure
+The `ErrorResponse` model follows the OpenAPI specification defined in `api.yaml`:
+
+```yaml
+ErrorResponse:
+  type: object
+  properties:
+    status:
+      type: integer
+      description: HTTP status code
+      example: 400
+    error:
+      type: string
+      description: Error type
+      example: "Bad Request"
+    message:
+      type: string
+      description: Error message
+      example: "Invalid request parameters"
+    path:
+      type: string
+      description: Request path
+      example: "/v1/sheet"
+    timestamp:
+      type: string
+      format: date-time
+      description: Time when the error occurred
+      example: "2025-06-04T00:30:00Z"
+    details:
+      type: object
+      description: Additional error details specific to the error type
+      additionalProperties: true
+      example: {"resourceId": "1", "lockOwner": "user123", "retryAfterMs": 5000}
+```
+
+This pattern ensures that error handling is robust, consistent, and provides sufficient information for clients to understand and react to issues gracefully.
+
+## Design Decisions
+### Repository Pattern
+- **Decision:** Use repository interfaces with multiple implementations
+- **Rationale:** Enables swapping out data storage implementations without changing service layer
+- **Implementation:** Each repository has a contract defined by an interface and one or more implementations
+
+### Caching Strategy
+- **Decision:** Use Redis for caching with TTL-based expiration
+- **Rationale:** Provides fast access to frequently used data while ensuring eventual consistency
+- **Implementation:** Cache-aside pattern with Redis as the cache and MongoDB as the source of truth
+
+### Asynchronous Processing
+- **Decision:** Use Spring's @Async for non-blocking operations
+- **Rationale:** Improves user experience by returning responses quickly while processing continues in background
+- **Implementation:** Async methods for dependent cell updates with proper exception handling
+
+### Circular Dependency Detection
+- **Decision:** Use depth-first search for cycle detection
+- **Rationale:** Efficiently detects cycles in dependency graphs before evaluation
+- **Implementation:** DFS algorithm that tracks visited nodes and current path
+
+## Cross-Cutting Concerns
+### Error Handling
+- **Repository Layer:** Catches database exceptions and translates to domain exceptions
+- **Service Layer:** Handles business logic exceptions and provides meaningful error messages
+- **Dependency Management:** Logs dependency creation, updates, and circular dependency detection
+
+### Logging
+- **Repository Layer:** Logs method entry/exit, parameters, and results
+- **Service Layer:** Logs business operations and decisions
+- **Dependency Management:** Logs dependency creation, updates, and circular dependency detection
+
+### Performance Optimization
+- **Caching:** Redis caching for frequently accessed dependencies
+- **Asynchronous Processing:** Background processing for dependent cell updates
+- **Batch Operations:** Batch saving of dependencies for better performance
+
+## Scalability Considerations
+### Horizontal Scaling
+- **Stateless Services:** All services are stateless and can be horizontally scaled
+- **Redis Clustering:** Redis can be configured for clustering to handle increased load
+- **MongoDB Sharding:** MongoDB collections can be sharded for horizontal scaling
+
+### Performance Bottlenecks
+- **Large Dependency Graphs:** May require optimization for spreadsheets with many dependencies
+- **Circular Dependency Detection:** Algorithm complexity increases with dependency graph size
+- **Redis Memory Usage:** Monitoring needed for Redis memory usage with large number of dependencies
+
 ## Expression Evaluation System
 The expression evaluation system is responsible for parsing and evaluating formulas in cells. It supports arithmetic operations, function calls, cell references, and cell ranges.
 
@@ -577,52 +712,3 @@ private fun evaluateArithmeticExpression(expression: String, context: Map<String
     // Evaluate the processed expression using tokenizer and operator precedence
     // ...
 }
-```
-
-## Design Decisions
-### Repository Pattern
-- **Decision:** Use repository interfaces with multiple implementations
-- **Rationale:** Enables swapping out data storage implementations without changing service layer
-- **Implementation:** Each repository has a contract defined by an interface and one or more implementations
-
-### Caching Strategy
-- **Decision:** Use Redis for caching with TTL-based expiration
-- **Rationale:** Provides fast access to frequently used data while ensuring eventual consistency
-- **Implementation:** Cache-aside pattern with Redis as the cache and MongoDB as the source of truth
-
-### Asynchronous Processing
-- **Decision:** Use Spring's @Async for non-blocking operations
-- **Rationale:** Improves user experience by returning responses quickly while processing continues in background
-- **Implementation:** Async methods for dependent cell updates with proper exception handling
-
-### Circular Dependency Detection
-- **Decision:** Use depth-first search for cycle detection
-- **Rationale:** Efficiently detects cycles in dependency graphs before evaluation
-- **Implementation:** DFS algorithm that tracks visited nodes and current path
-
-## Cross-Cutting Concerns
-### Error Handling
-- **Repository Layer:** Catches database exceptions and translates to domain exceptions
-- **Service Layer:** Handles business logic exceptions and provides meaningful error messages
-- **Controller Layer:** Converts exceptions to HTTP status codes and error messages
-
-### Logging
-- **Repository Layer:** Logs method entry/exit, parameters, and results
-- **Service Layer:** Logs business operations and decisions
-- **Dependency Management:** Logs dependency creation, updates, and circular dependency detection
-
-### Performance Optimization
-- **Caching:** Redis caching for frequently accessed dependencies
-- **Asynchronous Processing:** Background processing for dependent cell updates
-- **Batch Operations:** Batch saving of dependencies for better performance
-
-## Scalability Considerations
-### Horizontal Scaling
-- **Stateless Services:** All services are stateless and can be horizontally scaled
-- **Redis Clustering:** Redis can be configured for clustering to handle increased load
-- **MongoDB Sharding:** MongoDB collections can be sharded for horizontal scaling
-
-### Performance Bottlenecks
-- **Large Dependency Graphs:** May require optimization for spreadsheets with many dependencies
-- **Circular Dependency Detection:** Algorithm complexity increases with dependency graph size
-- **Redis Memory Usage:** Monitoring needed for Redis memory usage with large number of dependencies
