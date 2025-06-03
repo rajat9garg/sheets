@@ -5,8 +5,6 @@ import com.sheets.models.domain.DataType
 import com.sheets.repositories.CellRedisRepository
 import com.sheets.services.CellAsyncService
 import com.sheets.services.CellDependencyService
-import com.sheets.services.expression.ExpressionEvaluator
-import com.sheets.services.expression.ExpressionParser
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.Instant
@@ -18,8 +16,7 @@ import java.time.Instant
 class PrimitiveDataProcessor(
     private val cellRedisRepository: CellRedisRepository,
     private val cellAsyncService: CellAsyncService,
-    private val cellDependencyService: CellDependencyService,
-
+    private val cellDependencyService: CellDependencyService
 ) {
     private val logger = LoggerFactory.getLogger(PrimitiveDataProcessor::class.java)
 
@@ -37,12 +34,11 @@ class PrimitiveDataProcessor(
             updatedAt = timestamp
         )
         
-        // Save to Redis with TTL
+        // Save to Redis immediately
         logger.debug("Saving new primitive cell to Redis: {}", newCell.id)
         cellRedisRepository.saveCell(newCell)
         
         // Save to MongoDB asynchronously
-        logger.debug("Saving new primitive cell to MongoDB asynchronously: {}", newCell.id)
         cellAsyncService.saveCell(newCell)
         
         logger.info("Successfully created primitive cell: {} by user: {}", cell.id, userId)
@@ -60,6 +56,7 @@ class PrimitiveDataProcessor(
     ): Cell {
         logger.debug("Processing primitive data for existing cell: {}", existingCell.id)
 
+        // Update the cell
         val updatedCell = existingCell.copy(
             data = newCellData.data,
             dataType = DataType.PRIMITIVE,
@@ -67,50 +64,20 @@ class PrimitiveDataProcessor(
             updatedAt = timestamp
         )
         
-        // If the cell was previously an expression, clean up old dependencies
-        if (existingCell.dataType == DataType.EXPRESSION) {
-            logger.debug("Cleaning up dependencies for cell: {}", existingCell.id)
-            cellDependencyService.deleteBySourceCellId(existingCell.id)
-        }
-
+        // Save to Redis immediately
+        logger.debug("Saving updated primitive cell to Redis: {}", updatedCell.id)
         cellRedisRepository.saveCell(updatedCell)
-
+        
+        // Save to MongoDB asynchronously
         cellAsyncService.saveCell(updatedCell)
-
-        updateDependentCells(existingCell.id, userId)
+        
+        // Clean up any dependencies that might have existed if this was previously an expression
+        cellAsyncService.updateDependencies(existingCell.id, emptyList(), existingCell.sheetId, timestamp)
+        
+        // Update any cells that might depend on this cell
+        cellAsyncService.updateDependentCells(existingCell.id, userId)
         
         logger.info("Successfully updated primitive cell: {} by user: {}", existingCell.id, userId)
         return updatedCell
-    }
-
-    private fun updateDependentCells(cellId: String, userId: String) {
-        logger.debug("Delegating dependent cell updates to CellDependencyService for cell: {}", cellId)
-        cellDependencyService.updateDependentCells(cellId, userId)
-    }
-
-    private fun buildEvaluationContext(cellReferences: List<String>, sheetId: Long, row: Int, column: String): Map<String, String> {
-        val context = mutableMapOf<String, String>()
-        
-        // Add sheet ID to the context
-        context["sheetId"] = sheetId.toString()
-        
-        for (cellRef in cellReferences) {
-            val cellId = if (cellRef.contains(":")) {
-                "$sheetId:$cellRef"
-            } else {
-                val colLetter = cellRef.takeWhile { it.isLetter() }
-                val rowNum = cellRef.dropWhile { it.isLetter() }.toIntOrNull() ?: row
-                val colNum = colLetter.uppercase().fold(0) { acc, c -> acc * 26 + (c.code - 'A'.code + 1) }
-                "$sheetId:$rowNum:$colNum"
-            }
-            
-            val cell = cellRedisRepository.getCell(cellId)
-            context[cellRef] = cell?.evaluatedValue ?: "#REF!"
-        }
-        
-        context["row"] = row.toString()
-        context["column"] = column
-        
-        return context
     }
 }

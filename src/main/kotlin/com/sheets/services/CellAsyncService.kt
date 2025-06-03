@@ -1,23 +1,20 @@
 package com.sheets.services
 
 import com.sheets.models.domain.Cell
+import com.sheets.models.domain.CellDependency
 
-/**
- * Service interface for asynchronous cell operations
- */
+
 interface CellAsyncService {
-    /**
-     * Asynchronously save a cell to MongoDB
-     */
+
     fun saveCell(cell: Cell)
     
-    /**
-     * Asynchronously save multiple cells to MongoDB
-     */
+
     fun saveCells(cells: List<Cell>)
     
-    /**
-     * Asynchronously delete a cell from MongoDB
-     */
+
     fun deleteCell(id: String)
+
+    fun updateDependencies(cellId: String, dependencies: List<String>, sheetId: Long, timestamp: java.time.Instant)
+
+    fun updateDependentCells(cellId: String, userId: String)
 }

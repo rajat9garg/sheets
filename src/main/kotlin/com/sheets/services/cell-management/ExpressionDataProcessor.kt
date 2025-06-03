@@ -166,7 +166,6 @@ class ExpressionDataProcessor(
         context["sheetId"] = sheetId.toString()
         
         for (cellRef in cellReferences) {
-            // Handle A1 notation directly
             if (!cellRef.contains(":")) {
                 val colLetter = cellRef.takeWhile { it.isLetter() }
                 val rowNum = cellRef.dropWhile { it.isLetter() }.toIntOrNull() ?: row
@@ -175,14 +174,11 @@ class ExpressionDataProcessor(
                 logger.debug("Looking up cell with ID: {} for reference: {}", cellId, cellRef)
                 val cell = cellRedisRepository.getCell(cellId)
                 if (cell != null) {
-                    logger.debug("Found cell: {}, value: {}", cellId, cell.evaluatedValue)
                     context[cellRef] = cell.evaluatedValue
                 } else {
-                    logger.warn("Cell not found: {} for reference: {}", cellId, cellRef)
                     context[cellRef] = "#REF!"
                 }
             } else {
-                // Legacy format (row:col) - convert to A1 notation
                 val parts = cellRef.split(":")
                 if (parts.size == 2) {
                     val rowNum = parts[0].toIntOrNull() ?: row
@@ -194,26 +190,21 @@ class ExpressionDataProcessor(
                         val a1Ref = "$colLetter$rowNum"
                         val cellId = "$sheetId:$rowNum:$colLetter"
                         
-                        logger.debug("Looking up cell with ID: {} for reference: {} (A1: {})", cellId, cellRef, a1Ref)
                         val cell = cellRedisRepository.getCell(cellId)
                         if (cell != null) {
-                            logger.debug("Found cell: {}, value: {}", cellId, cell.evaluatedValue)
                             context[cellRef] = cell.evaluatedValue
                             // Also add the A1 reference to the context
                             context[a1Ref] = cell.evaluatedValue
                         } else {
-                            logger.warn("Cell not found: {} for reference: {}", cellId, cellRef)
                             context[cellRef] = "#REF!"
                             context[a1Ref] = "#REF!"
                         }
                     } else {
                         // Invalid column number
-                        logger.warn("Invalid column number in cell reference: {}", cellRef)
                         context[cellRef] = "#REF!"
                     }
                 } else {
                     // Invalid cell reference format
-                    logger.warn("Invalid cell reference format: {}", cellRef)
                     context[cellRef] = "#REF!"
                 }
             }
@@ -249,21 +240,18 @@ class ExpressionDataProcessor(
     }
 
     private fun updateDependencies(cellId: String, dependencies: List<String>, sheetId: Long, timestamp: Instant) {
-        logger.debug("Updating dependencies for cell: {}", cellId)
-        
+
         // Delete existing dependencies
         cellDependencyService.deleteBySourceCellId(cellId)
         
         // Create new dependencies if any
         if (dependencies.isNotEmpty()) {
-            logger.debug("Creating {} new dependencies for cell: {}", dependencies.size, cellId)
             val cellDependencies = CellUtils.createCellDependencies(sheetId, cellId, dependencies, timestamp)
             cellDependencyService.createDependencies(cellDependencies)
         }
     }
 
     private fun updateDependentCells(cellId: String, userId: String) {
-        logger.debug("Delegating dependent cell updates to CellDependencyService for cell: {}", cellId)
         cellDependencyService.updateDependentCells(cellId, userId)
     }
 }

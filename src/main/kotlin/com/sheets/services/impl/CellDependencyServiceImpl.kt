@@ -13,6 +13,7 @@ import com.sheets.services.expression.CircularDependencyDetector
 import com.sheets.services.expression.ExpressionEvaluator
 import com.sheets.services.expression.ExpressionParser
 import org.slf4j.LoggerFactory
+import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Service
 import java.time.Instant
 
@@ -23,7 +24,7 @@ class CellDependencyServiceImpl(
     private val circularDependencyDetector: CircularDependencyDetector,
     private val cellRedisRepository: CellRedisRepository,
     private val cellLockService: CellLockService,
-    private val cellAsyncService: CellAsyncService,
+    @Lazy private val cellAsyncService: CellAsyncService,
     private val expressionParser: ExpressionParser,
     private val expressionEvaluator: ExpressionEvaluator
 ) : CellDependencyService {
