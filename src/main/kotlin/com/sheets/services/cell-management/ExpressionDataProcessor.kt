@@ -1,0 +1,280 @@
+package com.sheets.services.`cell-management`
+
+import com.sheets.models.domain.Cell
+import com.sheets.models.domain.DataType
+import com.sheets.repositories.CellRedisRepository
+import com.sheets.services.CellAsyncService
+import com.sheets.services.CellDependencyService
+import com.sheets.services.CellLockService
+import com.sheets.services.expression.CircularDependencyDetector
+import com.sheets.services.expression.ExpressionEvaluator
+import com.sheets.services.expression.ExpressionParser
+import com.sheets.services.expression.exception.CircularDependencyException
+import org.slf4j.LoggerFactory
+import org.springframework.stereotype.Component
+import java.time.Instant
+
+/**
+ * Processor for expression data type cells
+ */
+@Component
+class ExpressionDataProcessor(
+    private val cellRedisRepository: CellRedisRepository,
+    private val cellAsyncService: CellAsyncService,
+    private val cellDependencyService: CellDependencyService,
+    private val cellLockService: CellLockService,
+    private val expressionParser: ExpressionParser,
+    private val expressionEvaluator: ExpressionEvaluator,
+    private val circularDependencyDetector: CircularDependencyDetector
+) {
+    private val logger = LoggerFactory.getLogger(ExpressionDataProcessor::class.java)
+
+
+    fun processNewCell(cell: Cell, timestamp: Instant, userId: String): Cell {
+        logger.debug("Processing expression for new cell: {}", cell.id)
+        
+        // Process the expression and extract dependencies
+        val (dataType, evaluatedValue, dependencies) = processExpression(
+            cell.data, 
+            cell.sheetId, 
+            cell.row, 
+            cell.column
+        )
+        
+        // Collect all cells that need to be locked
+        val cellsToLock = collectCellsToLock(cell.id, dependencies)
+        
+        // Sort cells by ID to prevent deadlocks (consistent locking order)
+        val sortedCellsToLock = cellsToLock.distinct().sorted()
+        
+        // Acquire locks on all cells
+        if (!acquireLocks(sortedCellsToLock, userId)) {
+            throw IllegalStateException("Could not acquire locks for cell: ${cell.id}")
+        }
+        
+        try {
+            val newCell = cell.copy(
+                dataType = dataType,
+                evaluatedValue = evaluatedValue,
+                createdAt = timestamp,
+                updatedAt = timestamp
+            )
+            
+            // Update dependencies
+            updateDependencies(cell.id, dependencies, cell.sheetId, timestamp)
+            
+            // Store the cell in Redis with TTL
+            logger.debug("Saving new expression cell to Redis: {}", newCell.id)
+            cellRedisRepository.saveCell(newCell)
+            
+            // Save to MongoDB asynchronously
+            logger.debug("Saving new expression cell to MongoDB asynchronously: {}", newCell.id)
+            cellAsyncService.saveCell(newCell)
+            
+            logger.info("Successfully created expression cell: {} by user: {}", cell.id, userId)
+            return newCell
+        } finally {
+            // Release locks
+            releaseLocks(sortedCellsToLock, userId)
+        }
+    }
+
+    /**
+     * Process an existing cell with expression data
+     */
+    fun processExistingCell(
+        existingCell: Cell,
+        newCellData: Cell,
+        timestamp: Instant,
+        userId: String
+    ): Cell {
+        logger.debug("Processing expression for existing cell: {}", existingCell.id)
+        
+        // Process the expression and extract dependencies
+        val (dataType, evaluatedValue, dependencies) = processExpression(
+            newCellData.data, 
+            newCellData.sheetId, 
+            newCellData.row, 
+            newCellData.column
+        )
+        
+        // Collect all cells that need to be locked
+        val cellsToLock = collectCellsToLock(existingCell.id, dependencies)
+        
+        // Sort cells by ID to prevent deadlocks (consistent locking order)
+        val sortedCellsToLock = cellsToLock.distinct().sorted()
+        
+        // Acquire locks on all cells
+        if (!acquireLocks(sortedCellsToLock, userId)) {
+            throw IllegalStateException("Could not acquire locks for cell: ${existingCell.id}")
+        }
+        
+        try {
+            // Update the cell
+            val updatedCell = existingCell.copy(
+                data = newCellData.data,
+                dataType = dataType,
+                evaluatedValue = evaluatedValue,
+                updatedAt = timestamp
+            )
+            
+            // Update dependencies
+            updateDependencies(existingCell.id, dependencies, existingCell.sheetId, timestamp)
+            
+            // Persist the updated cell
+            logger.debug("Saving updated expression cell to Redis: {}", updatedCell.id)
+            cellRedisRepository.saveCell(updatedCell)
+            
+            // Save to MongoDB asynchronously
+            logger.debug("Saving updated expression cell to MongoDB asynchronously: {}", updatedCell.id)
+            cellAsyncService.saveCell(updatedCell)
+            
+            // Update dependent cells
+            updateDependentCells(existingCell.id, userId)
+            
+            logger.info("Successfully updated expression cell: {} by user: {}", existingCell.id, userId)
+            return updatedCell
+        } finally {
+            // Release locks
+            releaseLocks(sortedCellsToLock, userId)
+        }
+    }
+
+
+    fun processExpression(
+        expression: String, 
+        sheetId: Long, 
+        row: Int, 
+        column: String
+    ): Triple<DataType, String, List<String>> {
+        if (expression.isBlank()) {
+            return Triple(DataType.PRIMITIVE, "", emptyList())
+        }
+        
+        if (!CellUtils.isExpression(expression)) {
+            return Triple(DataType.PRIMITIVE, expression, emptyList())
+        }
+        
+        // Parse the expression
+        logger.debug("Parsing expression: {}", expression)
+        val cellReferences = expressionParser.parse(expression)
+        
+        // Get the dependencies
+        logger.debug("Getting dependencies for expression: {}", cellReferences)
+        val dependencies = cellReferences.map { cellRef ->
+            if (cellRef.contains(":")) {
+                "$sheetId:$cellRef"
+            } else {
+                val colLetter = cellRef.takeWhile { it.isLetter() }
+                val rowNum = cellRef.dropWhile { it.isLetter() }.toIntOrNull() ?: row
+                val colNum = colLetter.uppercase().fold(0) { acc, c -> acc * 26 + (c.code - 'A'.code + 1) }
+                "$sheetId:$rowNum:$colNum"
+            }
+        }
+        
+        // Check for circular dependencies
+        logger.debug("Checking for circular dependencies")
+        val cellId = "$sheetId:$row:$column"
+        val dependencyMap = CellUtils.buildDependencyMap(cellDependencyService, sheetId, dependencies)
+        val cycle = circularDependencyDetector.detectCircularDependency(cellId, dependencyMap)
+        
+        if (cycle != null) {
+            val pathStr = cycle.joinToString(" -> ")
+            logger.warn("Circular dependency detected: {}", pathStr)
+            throw CircularDependencyException(listOf(pathStr))
+        }
+        
+        // Evaluate the expression
+        logger.debug("Evaluating expression: {}", expression)
+        val context = buildEvaluationContext(cellReferences, sheetId, row)
+        val evaluatedValue = expressionEvaluator.evaluate(expression, context)
+        
+        return Triple(DataType.EXPRESSION, evaluatedValue, dependencies)
+    }
+
+
+    private fun buildEvaluationContext(cellReferences: List<String>, sheetId: Long, row: Int): Map<String, String> {
+        val context = mutableMapOf<String, String>()
+        
+        // Add sheet ID to the context
+        context["sheetId"] = sheetId.toString()
+        
+        for (cellRef in cellReferences) {
+            val cellId = if (cellRef.contains(":")) {
+                "$sheetId:$cellRef"
+            } else {
+                val colLetter = cellRef.takeWhile { it.isLetter() }
+                val rowNum = cellRef.dropWhile { it.isLetter() }.toIntOrNull() ?: row
+                val colNum = colLetter.uppercase().fold(0) { acc, c -> acc * 26 + (c.code - 'A'.code + 1) }
+                "$sheetId:$rowNum:$colNum"
+            }
+            
+            val cell = cellRedisRepository.getCell(cellId)
+            context[cellRef] = cell?.evaluatedValue ?: "#REF!"
+        }
+        
+        context["row"] = row.toString()
+        
+        return context
+    }
+
+    private fun collectCellsToLock(cellId: String, dependencies: List<String>): List<String> {
+        val cellsToLock = mutableListOf(cellId)
+        cellsToLock.addAll(dependencies)
+        
+        val dependentCells = cellDependencyService.getDependenciesByTargetCellId(cellId)
+            .map { it.sourceCellId }
+        cellsToLock.addAll(dependentCells)
+        
+        return cellsToLock
+    }
+
+
+    private fun acquireLocks(cellIds: List<String>, userId: String): Boolean {
+        logger.debug("Attempting to acquire locks on {} cells", cellIds.size)
+        val lockedCells = mutableListOf<String>()
+        
+        for (cellId in cellIds) {
+            if (!cellLockService.acquireLock(cellId, userId)) {
+                // If we can't acquire a lock, release all locks we've acquired so far
+                logger.warn("Failed to acquire lock on cell: {} for user: {}", cellId, userId)
+                for (lockedCellId in lockedCells) {
+                    logger.debug("Releasing lock on cell: {} for user: {}", lockedCellId, userId)
+                    cellLockService.releaseLock(lockedCellId, userId)
+                }
+                return false
+            }
+            logger.debug("Acquired lock on cell: {} for user: {}", cellId, userId)
+            lockedCells.add(cellId)
+        }
+        
+        return true
+    }
+
+    private fun releaseLocks(lockedCells: List<String>, userId: String) {
+        logger.debug("Releasing all locks acquired for updating cells")
+        for (lockedCellId in lockedCells) {
+            logger.debug("Releasing lock on cell: {} for user: {}", lockedCellId, userId)
+            cellLockService.releaseLock(lockedCellId, userId)
+        }
+    }
+
+    private fun updateDependencies(cellId: String, dependencies: List<String>, sheetId: Long, timestamp: Instant) {
+        logger.debug("Updating dependencies for cell: {}", cellId)
+        
+        // Delete existing dependencies
+        cellDependencyService.deleteBySourceCellId(cellId)
+        
+        // Create new dependencies if any
+        if (dependencies.isNotEmpty()) {
+            logger.debug("Creating {} new dependencies for cell: {}", dependencies.size, cellId)
+            val cellDependencies = CellUtils.createCellDependencies(sheetId, cellId, dependencies, timestamp)
+            cellDependencyService.createDependencies(cellDependencies)
+        }
+    }
+
+    private fun updateDependentCells(cellId: String, userId: String) {
+        logger.debug("Delegating dependent cell updates to CellDependencyService for cell: {}", cellId)
+        cellDependencyService.updateDependentCells(cellId, userId)
+    }
+}

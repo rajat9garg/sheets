@@ -3,16 +3,19 @@ package com.sheets.services.expression.functions
 import com.sheets.services.CellService
 import com.sheets.services.expression.ExpressionFunction
 import com.sheets.services.expression.exception.FunctionEvaluationException
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.util.regex.Pattern
 
 @Component
 class SumFunction(private val cellService: CellService) : ExpressionFunction {
     
+    private val logger = LoggerFactory.getLogger(SumFunction::class.java)
     private val cellReferencePattern = Pattern.compile("(\\d+):(\\d+)")
     private val rangePattern = Pattern.compile("(\\d+):(\\d+)-(\\d+):(\\d+)")
     private val a1CellPattern = Pattern.compile("([A-Z]+)(\\d+)")
     private val a1RangePattern = Pattern.compile("([A-Z]+\\d+):([A-Z]+\\d+)")
+    private val sheetIdPattern = Pattern.compile("sheetId=(\\d+)")
     
     override fun name(): String = "SUM"
     
@@ -21,9 +24,34 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
             throw FunctionEvaluationException("SUM", "No arguments provided")
         }
         
+        // Extract the sheet ID from the context (last argument)
+        var sheetId = 0L
+        val argsToProcess = args.toMutableList()
+        val sheetIdArg = argsToProcess.find { it.startsWith("sheetId=") }
+        
+        if (sheetIdArg != null) {
+            try {
+                val matcher = sheetIdPattern.matcher(sheetIdArg)
+                if (matcher.matches()) {
+                    sheetId = matcher.group(1).toLong()
+                    logger.info("Extracted sheetId: {} from context", sheetId)
+                    argsToProcess.remove(sheetIdArg)
+                }
+            } catch (e: Exception) {
+                logger.warn("Failed to extract sheetId from context: {}", e.message)
+            }
+        }
+        
+        // If we couldn't extract a sheet ID, log a warning
+        if (sheetId == 0L) {
+            logger.warn("No sheetId provided in context, using default")
+            sheetId = 14L // Default for backward compatibility, but this should be provided
+        }
+        
         var sum = 0.0
         
-        for (arg in args) {
+        // Process all arguments except the last one if it contains sheetId
+        for (arg in argsToProcess) {
             try {
                 // Check if the argument is a range in row:col-row:col format (e.g., 1:1-3:3)
                 val rangeMatcher = rangePattern.matcher(arg)
@@ -32,7 +60,7 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                     val startCol = rangeMatcher.group(2).toInt()
                     val endRow = rangeMatcher.group(3).toInt()
                     val endCol = rangeMatcher.group(4).toInt()
-                    sum += sumRange(startRow, startCol, endRow, endCol)
+                    sum += sumRange(startRow, startCol, endRow, endCol, sheetId)
                     continue
                 }
                 
@@ -42,13 +70,15 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                     val row = cellMatcher.group(1).toInt()
                     val col = cellMatcher.group(2).toInt()
                     
-                    // Get the current sheet ID from the context
-                    val sheetId = 13L // This should be passed from the context
                     val cellId = "$sheetId:$row:$col"
                     
+                    logger.info("SUM: Looking up cell with ID: {}", cellId)
                     val cell = cellService.getCell(cellId)
                     if (cell != null) {
+                        logger.info("SUM: Found cell: {}, value: {}", cellId, cell.evaluatedValue)
                         sum += cell.evaluatedValue.toDoubleOrNull() ?: 0.0
+                    } else {
+                        logger.warn("SUM: Cell not found: {}", cellId)
                     }
                     continue
                 }
@@ -72,7 +102,7 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                         val endRow = endA1Matcher.group(2).toInt()
                         val endCol = columnLetterToNumber(endColLetter)
                         
-                        sum += sumRange(startRow, startCol, endRow, endCol)
+                        sum += sumRange(startRow, startCol, endRow, endCol, sheetId)
                         continue
                     }
                 }
@@ -84,13 +114,15 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                     val row = a1CellMatcher.group(2).toInt()
                     val col = columnLetterToNumber(colLetter)
                     
-                    // Get the current sheet ID from the context
-                    val sheetId = 13L // This should be passed from the context
                     val cellId = "$sheetId:$row:$col"
                     
+                    logger.info("SUM: Looking up cell with ID: {}", cellId)
                     val cell = cellService.getCell(cellId)
                     if (cell != null) {
+                        logger.info("SUM: Found cell: {}, value: {}", cellId, cell.evaluatedValue)
                         sum += cell.evaluatedValue.toDoubleOrNull() ?: 0.0
+                    } else {
+                        logger.warn("SUM: Cell not found: {}", cellId)
                     }
                     continue
                 }
@@ -107,9 +139,8 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
         return sum.toString()
     }
     
-    private fun sumRange(startRow: Int, startCol: Int, endRow: Int, endCol: Int): Double {
+    private fun sumRange(startRow: Int, startCol: Int, endRow: Int, endCol: Int, sheetId: Long): Double {
         var sum = 0.0
-        val sheetId = 13L // This should be passed from the context
         
         for (row in startRow..endRow) {
             for (col in startCol..endCol) {

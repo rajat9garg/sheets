@@ -13,4 +13,5 @@ interface CellDependencyService {
     fun deleteByTargetCellId(targetCellId: String): Int
     fun deleteBySheetId(sheetId: Long): Int
     fun detectCircularDependency(cellId: String): List<String>?
+    fun updateDependentCells(cellId: String, userId: String)
 }

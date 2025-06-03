@@ -477,7 +477,7 @@ interface CircularDependencyDetector {
 
 For a comprehensive implementation plan for expression parsing and evaluation, including detailed interfaces, implementations, and testing strategies, refer to:
 
-- [Task4 Expression Implementation Plan](./task4_expression_implementation_plan.md)
+- [Task4 Expression Implementation Plan](task4_expression_implementation_plan.md)
 
 ## 7. Cell Dependency Management
 
@@ -572,7 +572,7 @@ fun releaseLock(cellId: String, userId: Long): Boolean {
 
 For a comprehensive implementation plan for the service layer, including cell dependency management and concurrency control, refer to:
 
-- [Task4 Service Implementation Plan](./task4_service_implementation_plan.md)
+- [Task4 Service Implementation Plan](task4_service_implementation_plan.md)
 
 ## 8. Testing Strategy
 
@@ -604,10 +604,10 @@ For a comprehensive implementation plan for the service layer, including cell de
 
 For detailed testing strategies for specific components, refer to:
 
-- [Task4 Expression Implementation Plan](./task4_expression_implementation_plan.md) (Section 8: Testing Strategy)
-- [Task4 Service Implementation Plan](./task4_service_implementation_plan.md) (Section 8: Testing Strategy)
-- [Task4 Controller Implementation Plan](./task4_controller_implementation_plan.md) (Section 6: Testing Strategy)
-- [Task4 MongoDB Implementation Plan](./task4_mongodb_implementation_plan.md) (Section 6: Testing Strategy)
+- [Task4 Expression Implementation Plan](task4_expression_implementation_plan.md) (Section 8: Testing Strategy)
+- [Task4 Service Implementation Plan](task4_service_implementation_plan.md) (Section 8: Testing Strategy)
+- [Task4 Controller Implementation Plan](task4_controller_implementation_plan.md) (Section 6: Testing Strategy)
+- [Task4 MongoDB Implementation Plan](task4_mongodb_implementation_plan.md) (Section 6: Testing Strategy)
 
 ## 9. Implementation Timeline
 
@@ -692,7 +692,7 @@ Used for handling different types of expressions, allowing us to add new express
 
 For detailed error handling strategies, refer to:
 
-- [Task4 Controller Implementation Plan](./task4_controller_implementation_plan.md) (Section 5: Error Handling)
+- [Task4 Controller Implementation Plan](task4_controller_implementation_plan.md) (Section 5: Error Handling)
 
 ## 12. Monitoring and Logging
 
@@ -746,8 +746,8 @@ This implementation plan provides a comprehensive approach to implementing the C
 
 For detailed implementation plans for specific components, refer to:
 
-- [Task4 MongoDB Implementation Plan](./task4_mongodb_implementation_plan.md)
-- [Task4 Expression Implementation Plan](./task4_expression_implementation_plan.md)
-- [Task4 OpenAPI Implementation Plan](./task4_openapi_implementation_plan.md)
-- [Task4 Service Implementation Plan](./task4_service_implementation_plan.md)
-- [Task4 Controller Implementation Plan](./task4_controller_implementation_plan.md)
+- [Task4 MongoDB Implementation Plan](task4_mongodb_implementation_plan.md)
+- [Task4 Expression Implementation Plan](task4_expression_implementation_plan.md)
+- [Task4 OpenAPI Implementation Plan](task4_openapi_implementation_plan.md)
+- [Task4 Service Implementation Plan](task4_service_implementation_plan.md)
+- [Task4 Controller Implementation Plan](task4_controller_implementation_plan.md)

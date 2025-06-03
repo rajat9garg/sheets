@@ -6,7 +6,7 @@ data class Cell(
     val id: String, // Format: sheetId:row:column
     val sheetId: Long,
     val row: Int,
-    val column: Int,
+    val column: String,
     val data: String,
     val dataType: DataType,
     val evaluatedValue: String,

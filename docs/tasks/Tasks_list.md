@@ -41,5 +41,15 @@ Task4
   - take a lock on the dependencies using redis and then update the cell data in redis
   - update the data in the redis cache
 
+Algorithm to update/add value of a cell with expression
+- change the column to be alphabetical instead of a number so the a cell will be represented as A1,A2,A3,B1,B2,B3 AA1
 
-lock free datastructure
+- check first we are getting an expression or not
+- If we are getting and expression parse it to figure out the dependencies and which expression is it
+- Store the dependencies in cell_dependencies tables in mongoDB
+- calculate the value of the expression and store it in the cell table in mongoDB
+- Store the cell value in redis with a ttl of 1 hour and cell dependencies also in redis and update the mongoDb async
+- check for cyclic dependency for concurrent calls if it is there revoke the operation
+- Also tell me how would you solve for deadlocks
+- return the value
+INPUT: =row + column

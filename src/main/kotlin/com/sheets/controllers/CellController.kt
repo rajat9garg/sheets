@@ -40,57 +40,91 @@ class CellController(
             logger.debug("Validating sheet access for sheet: {} and user: {}", sheetId, xUserID)
             sheetService.getSheetById(sheetId, xUserID)
 
+            // Convert column number to alphabetical notation (A, B, C, ... AA, AB, etc.)
+            val columnLetter = numberToColumnLetter(cellRequest.column)
+            val cellPosition = "$columnLetter${cellRequest.row}"
+            logger.debug("Cell position in A1 notation: {}", cellPosition)
+            
             // Create a cell object from the request
             val cellId = "${sheetId}:${cellRequest.row}:${cellRequest.column}"
             logger.debug("Cell ID for update: {}", cellId)
             
             try {
-                // Get existing cell
+                // Get existing cell or create a new one if it doesn't exist
                 logger.debug("Retrieving existing cell with ID: {}", cellId)
-                val existingCell = cellService.getCell(cellId) ?: run {
-                    logger.warn("Cell not found with ID: {}", cellId)
-                    return ResponseEntity
-                        .status(HttpStatus.NOT_FOUND)
-                        .body(null)
-                }
-                    
-                // Update the cell
-                logger.debug("Updating cell with ID: {}", cellId)
-                val updatedCell = cellService.updateCell(
-                    existingCell.copy(
-                        data = cellRequest.data
-                    ),
-                    xUserID.toString()
+                val existingCell = cellService.getCell(cellId) ?: Cell(
+                    id = cellId,
+                    sheetId = sheetId,
+                    row = cellRequest.row,
+                    column = cellRequest.column.toString(),
+                    data = "",
+                    dataType = DataType.PRIMITIVE,
+                    evaluatedValue = "",
+                    createdAt = Instant.now(),
+                    updatedAt = Instant.now()
                 )
                 
-                // Convert to response
-                val response = toCellResponse(updatedCell)
-                logger.info("Successfully updated cell at row: {}, column: {} in sheet: {} by user: {}", 
-                    cellRequest.row, cellRequest.column, sheetId, xUserID)
+                // Check if the data is an expression
+                val data = cellRequest.data
+                val isExpression = data.trim().startsWith("=")
                 
-                return ResponseEntity.ok(response)
-            } catch (e: CircularDependencyException) {
-                logger.error("Circular dependency detected while updating cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
-                    cellRequest.row, cellRequest.column, sheetId, xUserID, e.message)
-                return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body(null)
-            } catch (e: ExpressionException) {
-                logger.error("Expression error while updating cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
-                    cellRequest.row, cellRequest.column, sheetId, xUserID, e.message)
-                return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body(null)
+                if (isExpression) {
+                    logger.debug("Processing expression: {}", data)
+                    try {
+                        // Update the cell with the expression
+                        val updatedCell = cellService.updateCell(
+                            existingCell.copy(
+                                data = data
+                            ),
+                            xUserID.toString()
+                        )
+                        
+                        // Convert to response
+                        val response = toCellResponse(updatedCell)
+                        logger.info("Successfully updated cell with expression at position: {} in sheet: {} by user: {}", 
+                            cellPosition, sheetId, xUserID)
+                        
+                        return ResponseEntity.ok(response)
+                    } catch (e: CircularDependencyException) {
+                        logger.error("Circular dependency detected while updating cell at position: {} in sheet: {} by user: {}: {}", 
+                            cellPosition, sheetId, xUserID, e.message)
+                        return ResponseEntity
+                            .status(HttpStatus.BAD_REQUEST)
+                            .body(null)
+                    } catch (e: ExpressionException) {
+                        logger.error("Expression error while updating cell at position: {} in sheet: {} by user: {}: {}", 
+                            cellPosition, sheetId, xUserID, e.message)
+                        return ResponseEntity
+                            .status(HttpStatus.BAD_REQUEST)
+                            .body(null)
+                    }
+                } else {
+                    // Update the cell with a primitive value
+                    logger.debug("Processing primitive value for cell: {}", cellId)
+                    val updatedCell = cellService.updateCell(
+                        existingCell.copy(
+                            data = data
+                        ),
+                        xUserID.toString()
+                    )
+                    
+                    // Convert to response
+                    val response = toCellResponse(updatedCell)
+                    logger.info("Successfully updated cell with primitive value at position: {} in sheet: {} by user: {}", 
+                        cellPosition, sheetId, xUserID)
+                    
+                    return ResponseEntity.ok(response)
+                }
             } catch (e: IllegalStateException) {
-                // This is likely a locking issue
-                logger.error("Lock acquisition failed while updating cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
-                    cellRequest.row, cellRequest.column, sheetId, xUserID, e.message)
+                // This is likely a locking issue or deadlock
+                logger.error("Lock acquisition failed while updating cell at position: {} in sheet: {} by user: {}: {}", 
+                    cellPosition, sheetId, xUserID, e.message)
                 return ResponseEntity
                     .status(HttpStatus.CONFLICT)
                     .body(null)
             } catch (e: Exception) {
-                logger.error("Unexpected error while updating cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
-                    cellRequest.row, cellRequest.column, sheetId, xUserID, e.message, e)
+                logger.error("Unexpected error while updating cell at position: {} in sheet: {} by user: {}: {}", 
+                    cellPosition, sheetId, xUserID, e.message, e)
                 return ResponseEntity
                     .status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(null)
@@ -158,7 +192,7 @@ class CellController(
                         id = cellId,
                         sheetId = sheetId,
                         row = row,
-                        column = column,
+                        column = column.toString(),
                         data = cellValue,
                         dataType = DataType.PRIMITIVE, // This will be determined by the service
                         evaluatedValue = "",           // This will be determined by the service
@@ -274,35 +308,26 @@ class CellController(
         
         try {
             // Validate that the sheet exists and user has access
-            logger.debug("Validating sheet access for sheet: {} and user: {}", sheetId, xUserID)
+            logger.info("Validating sheet access for sheet: {} and user: {}", sheetId, xUserID)
             sheetService.getSheetById(sheetId, xUserID)
                 
             // Delete cell
             val cellId = "${sheetId}:${row}:${column}"
             logger.debug("Deleting cell with ID: {}", cellId)
-            
-            try {
-                cellService.deleteCell(cellId, xUserID.toString())
-                logger.info("Successfully deleted cell at row: {}, column: {} in sheet: {} by user: {}", 
-                    row, column, sheetId, xUserID)
-                return ResponseEntity.noContent().build()
-            } catch (e: IllegalStateException) {
-                // This is likely a locking issue
-                logger.error("Lock acquisition failed while deleting cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
-                    row, column, sheetId, xUserID, e.message)
-                return ResponseEntity
-                    .status(HttpStatus.CONFLICT)
-                    .build()
-            } catch (e: Exception) {
-                logger.error("Unexpected error while deleting cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
-                    row, column, sheetId, xUserID, e.message, e)
-                return ResponseEntity
-                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .build()
-            }
+            cellService.deleteCell(cellId, xUserID.toString())
+            logger.info("Successfully deleted cell at row: {}, column: {} in sheet: {} by user: {}", 
+                row, column, sheetId, xUserID)
+            return ResponseEntity.noContent().build()
+        } catch (e: IllegalStateException) {
+            // This is likely a locking issue
+            logger.error("Lock acquisition failed while deleting cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
+                row, column, sheetId, xUserID, e.message)
+            return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .build()
         } catch (e: Exception) {
-            logger.error("Error validating sheet access for sheet: {} and user: {}: {}", 
-                sheetId, xUserID, e.message, e)
+            logger.error("Unexpected error while deleting cell at row: {}, column: {} in sheet: {} by user: {}: {}", 
+                row, column, sheetId, xUserID, e.message, e)
             return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .build()
@@ -315,7 +340,7 @@ class CellController(
             id = cell.id,
             sheetId = cell.sheetId,
             row = cell.row,
-            column = cell.column,
+            column = cell.column.toIntOrNull() ?: 0,
             data = cell.data,
             dataType = when (cell.dataType) {
                 DataType.PRIMITIVE -> CellResponse.DataType.PRIMITIVE
@@ -325,5 +350,32 @@ class CellController(
             createdAt = cell.createdAt.atZone(ZoneId.systemDefault()).toOffsetDateTime(),
             updatedAt = cell.updatedAt.atZone(ZoneId.systemDefault()).toOffsetDateTime()
         )
+    }
+    
+    /**
+     * Converts a column number to alphabetical notation (A, B, C, ... AA, AB, etc.)
+     */
+    private fun numberToColumnLetter(columnNumber: Int): String {
+        var dividend = columnNumber
+        var columnName = ""
+        
+        while (dividend > 0) {
+            val modulo = (dividend - 1) % 26
+            columnName = (modulo + 'A'.code).toChar() + columnName
+            dividend = (dividend - modulo) / 26
+        }
+        
+        return columnName
+    }
+    
+    /**
+     * Converts an alphabetical column notation to a number
+     */
+    private fun columnLetterToNumber(columnLetter: String): Int {
+        var result = 0
+        for (c in columnLetter) {
+            result = result * 26 + (c - 'A' + 1)
+        }
+        return result
     }
 }

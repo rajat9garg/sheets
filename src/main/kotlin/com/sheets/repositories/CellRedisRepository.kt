@@ -23,6 +23,7 @@ class CellRedisRepository(
     // Key prefixes
     private val CELL_KEY_PREFIX = "cell:"
     private val SHEET_CELLS_KEY_PREFIX = "sheet:cells:"
+    private val CELL_DEPENDENCIES_KEY_PREFIX = "cell:dependencies:"
     
     /**
      * Save a cell to Redis cache
@@ -43,6 +44,28 @@ class CellRedisRepository(
             logger.debug("Cell saved to Redis cache: {}", key)
         } catch (e: Exception) {
             logger.error("Error saving cell to Redis cache: {}: {}", cell.id, e.message, e)
+        }
+    }
+    
+    /**
+     * Save a cell to Redis cache with a custom TTL (in seconds)
+     */
+    fun saveCellWithTTL(cell: Cell, ttlSeconds: Long) {
+        try {
+            val key = getCellKey(cell.id)
+            val value = objectMapper.writeValueAsString(cell)
+            
+            logger.debug("Saving cell to Redis cache with TTL of {} seconds: {}", ttlSeconds, key)
+            redisTemplate.opsForValue().set(key, value, ttlSeconds, TimeUnit.SECONDS)
+            
+            // Add cell ID to the sheet's cell set
+            val sheetCellsKey = getSheetCellsKey(cell.sheetId)
+            redisTemplate.opsForSet().add(sheetCellsKey, cell.id)
+            redisTemplate.expire(sheetCellsKey, ttlSeconds, TimeUnit.SECONDS)
+            
+            logger.debug("Cell saved to Redis cache with custom TTL: {}", key)
+        } catch (e: Exception) {
+            logger.error("Error saving cell to Redis cache with TTL: {}: {}", cell.id, e.message, e)
         }
     }
     
@@ -142,6 +165,71 @@ class CellRedisRepository(
     }
     
     /**
+     * Save cell dependencies to Redis cache with a custom TTL (in seconds)
+     */
+    fun saveDependenciesWithTTL(cellId: String, dependencies: List<String>, ttlSeconds: Long) {
+        try {
+            if (dependencies.isEmpty()) {
+                return
+            }
+            
+            val key = getCellDependenciesKey(cellId)
+            logger.debug("Saving {} dependencies for cell to Redis cache with TTL of {} seconds: {}", 
+                dependencies.size, ttlSeconds, key)
+            
+            // Convert dependencies list to array for Redis
+            val dependenciesArray = dependencies.toTypedArray()
+            
+            // Save dependencies as a set
+            redisTemplate.opsForSet().add(key, *dependenciesArray)
+            redisTemplate.expire(key, ttlSeconds, TimeUnit.SECONDS)
+            
+            logger.debug("Dependencies saved to Redis cache with custom TTL: {}", key)
+        } catch (e: Exception) {
+            logger.error("Error saving dependencies to Redis cache with TTL: {}: {}", cellId, e.message, e)
+        }
+    }
+    
+    /**
+     * Get dependencies for a cell from Redis cache
+     */
+    fun getDependencies(cellId: String): List<String> {
+        try {
+            val key = getCellDependenciesKey(cellId)
+            logger.debug("Getting dependencies for cell from Redis cache: {}", key)
+            
+            val dependencies = redisTemplate.opsForSet().members(key)
+            
+            if (dependencies.isNullOrEmpty()) {
+                logger.debug("No dependencies found in Redis cache for cell: {}", cellId)
+                return emptyList()
+            }
+            
+            logger.debug("Found {} dependencies in Redis cache for cell: {}", dependencies.size, cellId)
+            return dependencies.toList()
+        } catch (e: Exception) {
+            logger.error("Error getting dependencies for cell from Redis cache: {}: {}", cellId, e.message, e)
+            return emptyList()
+        }
+    }
+    
+    /**
+     * Delete dependencies for a cell from Redis cache
+     */
+    fun deleteDependencies(cellId: String) {
+        try {
+            val key = getCellDependenciesKey(cellId)
+            logger.debug("Deleting dependencies for cell from Redis cache: {}", key)
+            
+            redisTemplate.delete(key)
+            
+            logger.debug("Dependencies deleted from Redis cache: {}", key)
+        } catch (e: Exception) {
+            logger.error("Error deleting dependencies for cell from Redis cache: {}: {}", cellId, e.message, e)
+        }
+    }
+    
+    /**
      * Get Redis key for a cell
      */
     private fun getCellKey(cellId: String): String {
@@ -153,5 +241,12 @@ class CellRedisRepository(
      */
     private fun getSheetCellsKey(sheetId: Long): String {
         return "$SHEET_CELLS_KEY_PREFIX$sheetId"
+    }
+    
+    /**
+     * Get Redis key for a cell's dependencies
+     */
+    private fun getCellDependenciesKey(cellId: String): String {
+        return "$CELL_DEPENDENCIES_KEY_PREFIX$cellId"
     }
 }

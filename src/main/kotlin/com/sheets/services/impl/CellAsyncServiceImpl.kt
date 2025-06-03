@@ -2,6 +2,7 @@ package com.sheets.services.impl
 
 import com.sheets.models.domain.Cell
 import com.sheets.repositories.CellRepository
+import com.sheets.services.CellAsyncService
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
@@ -12,14 +13,14 @@ import org.springframework.stereotype.Service
 @Service
 class CellAsyncServiceImpl(
     private val cellRepository: CellRepository
-) {
+) : CellAsyncService {
     private val logger = LoggerFactory.getLogger(CellAsyncServiceImpl::class.java)
     
     /**
      * Asynchronously save a cell to MongoDB
      */
     @Async
-    fun saveCell(cell: Cell) {
+    override fun saveCell(cell: Cell) {
         try {
             logger.debug("Asynchronously saving cell to MongoDB: {}", cell.id)
             cellRepository.save(cell)
@@ -33,7 +34,7 @@ class CellAsyncServiceImpl(
      * Asynchronously save multiple cells to MongoDB
      */
     @Async
-    fun saveCells(cells: List<Cell>) {
+    override fun saveCells(cells: List<Cell>) {
         try {
             logger.debug("Asynchronously saving {} cells to MongoDB", cells.size)
             cellRepository.saveAll(cells)
@@ -47,13 +48,13 @@ class CellAsyncServiceImpl(
      * Asynchronously delete a cell from MongoDB
      */
     @Async
-    fun deleteCell(cellId: String) {
+    override fun deleteCell(id: String) {
         try {
-            logger.debug("Asynchronously deleting cell from MongoDB: {}", cellId)
-            cellRepository.deleteById(cellId)
-            logger.debug("Cell deleted from MongoDB asynchronously: {}", cellId)
+            logger.debug("Asynchronously deleting cell from MongoDB: {}", id)
+            cellRepository.deleteById(id)
+            logger.debug("Cell deleted from MongoDB asynchronously: {}", id)
         } catch (e: Exception) {
-            logger.error("Error deleting cell from MongoDB asynchronously: {}: {}", cellId, e.message, e)
+            logger.error("Error deleting cell from MongoDB asynchronously: {}: {}", id, e.message, e)
         }
     }
 }
