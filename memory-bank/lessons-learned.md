@@ -1,9 +1,9 @@
 # Lessons Learned
 
 **Created:** 2025-05-24  
-**Last Updated:** 2025-06-04 02:32  
+**Last Updated:** 2025-06-04 02:55  
 **Last Updated By:** Cascade AI Assistant  
-**Related Components:** Database, ORM, PostgreSQL, Flyway, Repository Implementation, MongoDB, Redis, Cell Dependencies, Testing, A1 Notation
+**Related Components:** Database, ORM, PostgreSQL, Flyway, Repository Implementation, MongoDB, Redis, Cell Dependencies, Testing, A1 Notation, Stress Testing, Gatling, Concurrency
 
 ## Database & ORM Configuration
 
@@ -470,6 +470,179 @@ Transitioning from a numeric column reference system (e.g., 1:1, 2:3) to an alph
 3. **Enhanced Error Handling:** Provide more descriptive error messages for invalid cell references or ranges.
 4. **Unit Testing:** Add comprehensive unit tests for all expression functions and conversion utilities.
 5. **Performance Testing:** Conduct performance testing with large spreadsheets and complex formulas.
+
+## API Stress Testing with Gatling
+
+### Gatling Implementation
+1. **Session Variable Interpolation**
+   - **Lesson:** Gatling requires specific syntax for session variable interpolation in URLs and JSON bodies
+   - **Problem:** Initial implementation used `${variable}` syntax which doesn't work properly in Gatling
+   - **Solution:** Updated to use Gatling Expression Language syntax with `#{variable}` for proper interpolation
+   - **Best Practice:** Always use `#{variable}` syntax for session variables in Gatling HTTP requests and JSON bodies
+   - **Example:**
+     ```scala
+     http("Update Cell Value Request")
+       .post("/sheet/#{sheetId}/cell")
+       .header("X-User-ID", "#{userId}")
+       .body(StringBody("""
+         {
+           "row": #{row},
+           "column": "#{column}",
+           "data": "#{data}"
+         }
+       """.stripMargin))
+     ```
+
+2. **API Endpoint Path Consistency**
+   - **Lesson:** Stress tests must use the exact API paths defined in the OpenAPI specification
+   - **Problem:** Initial implementation used plural `/sheets` paths while the API used singular `/sheet`
+   - **Solution:** Updated all endpoint paths to match the OpenAPI specification (e.g., `/sheet/{sheetId}/cell`)
+   - **Best Practice:** Always verify API paths against the OpenAPI specification before implementing stress tests
+
+3. **Status Code Validation**
+   - **Lesson:** API endpoints may return multiple valid status codes depending on the scenario
+   - **Problem:** Initial implementation only checked for 200 OK responses
+   - **Solution:** Updated status checks to accept all valid status codes (e.g., `status.in(200, 400, 409)`)
+   - **Best Practice:** Review API documentation to identify all possible valid status codes for each endpoint
+
+4. **Health Check Endpoint**
+   - **Lesson:** Proper health check endpoint is essential for verifying service availability before tests
+   - **Problem:** Initial implementation used incorrect health check path
+   - **Solution:** Updated run script to check `/v1/health` endpoint before executing tests
+   - **Best Practice:** Implement a lightweight health check endpoint that verifies critical dependencies
+
+### Concurrency Testing
+1. **Shared Resource Access**
+   - **Lesson:** Testing concurrent updates to shared resources requires explicit setup
+   - **Solution:** Implemented a pattern where:
+     1. A single sheet is created and shared with all test users
+     2. Multiple users simultaneously update the same cells
+     3. Final state is verified after concurrent updates
+   - **Best Practice:** Use a limited set of resources (cells A1-E5) to maximize contention and test locking mechanisms
+
+2. **User ID Management**
+   - **Lesson:** Consistent user IDs are essential for proper access control in stress tests
+   - **Problem:** Random user IDs caused 403 Forbidden errors when accessing sheets
+   - **Solution:** Limited user IDs to a small range (1-5) and explicitly shared sheets with all test users
+   - **Best Practice:** Use a controlled set of user IDs that have proper access to test resources
+
+3. **Interleaving Updates**
+   - **Lesson:** Small pauses between requests create more realistic interleaving of concurrent updates
+   - **Solution:** Added 100ms pauses between concurrent update requests
+   - **Best Practice:** Use small, randomized pauses to create realistic concurrency patterns
+   - **Example:**
+     ```scala
+     .repeat(10) {
+       feed(fixedCellFeeder)
+       .exec(
+         http("Concurrent Primitive Update")
+           // HTTP request details
+       )
+       .pause(100.milliseconds) // Small pause to create interleaving updates
+     }
+     ```
+
+4. **Cell Dependency Testing**
+   - **Lesson:** Testing expression evaluation requires setting up proper cell dependencies
+   - **Solution:** Created a scenario where:
+     1. Base cells are populated with primitive values
+     2. Expression cells reference those base cells
+     3. Concurrent updates modify both base cells and expressions
+   - **Best Practice:** Test both direct updates to cells and indirect updates through dependencies
+
+### Circular Dependency Testing
+1. **Explicit Circular Reference Chain**
+   - **Lesson:** Testing circular dependency detection requires creating a known circular reference
+   - **Solution:** Implemented a scenario that creates a circular reference chain (A1→C1→B1→A1)
+   - **Best Practice:** Create the circular reference incrementally to identify where detection occurs
+   - **Unexpected Behavior:** The system returned 200 OK instead of the expected 400 Bad Request for circular dependencies, indicating a potential issue in circular dependency detection
+
+2. **Error Response Validation**
+   - **Lesson:** API error responses should be consistent and follow the defined schema
+   - **Problem:** Circular dependency errors were not returning the expected 400 status code
+   - **Action Item:** Review circular dependency detection and error handling in the application
+   - **Best Practice:** Validate that error responses match the expected format and status codes
+
+### Performance Insights
+1. **Response Time Distribution**
+   - **Lesson:** Performance metrics should include distribution statistics, not just averages
+   - **Solution:** Analyzed min, max, mean, and percentile response times (95th percentile: 102ms)
+   - **Best Practice:** Focus on percentile metrics (95th, 99th) rather than averages for realistic performance assessment
+
+2. **Concurrent User Scaling**
+   - **Lesson:** The system handled 20 concurrent users well, but higher loads should be tested
+   - **Solution:** Successfully tested with 20 concurrent users per scenario
+   - **Next Steps:** Increase to 50-100 users to find performance bottlenecks
+   - **Best Practice:** Incrementally increase user load until performance degradation is observed
+
+3. **Test Duration Considerations**
+   - **Lesson:** Short tests may not reveal memory leaks or performance degradation over time
+   - **Solution:** Current tests run for approximately 30 seconds
+   - **Next Steps:** Implement longer-duration tests (10+ minutes) to identify potential issues
+   - **Best Practice:** Include both short tests for quick feedback and long tests for stability assessment
+
+### Test Implementation
+1. **Scenario Separation**
+   - **Lesson:** Separating tests into distinct scenarios improves clarity and maintainability
+   - **Solution:** Implemented four separate scenarios (full workflow, concurrent primitives, concurrent expressions, circular dependencies)
+   - **Best Practice:** Design scenarios to test specific aspects of the system rather than creating monolithic tests
+
+2. **Data Feeder Design**
+   - **Lesson:** Specialized feeders for different test scenarios improve test quality
+   - **Solution:** Created specific feeders for user IDs, cell coordinates, fixed cells, and expressions
+   - **Best Practice:** Design feeders to generate realistic and relevant test data for each scenario
+   - **Example:**
+     ```scala
+     val fixedCellFeeder = Iterator.continually {
+       // Use a limited set of cells to ensure concurrent updates
+       val rowOptions = List(1, 2, 3, 4, 5)
+       val colOptions = List("A", "B", "C", "D", "E")
+       
+       val row = rowOptions(Random.nextInt(rowOptions.size))
+       val column = colOptions(Random.nextInt(colOptions.size))
+       
+       Map(
+         "row" -> row.toString,
+         "column" -> column,
+         "data" -> s"Concurrent update ${UUID.randomUUID().toString.substring(0, 8)}"
+       )
+     }
+     ```
+
+3. **A1 Notation in Stress Tests**
+   - **Lesson:** Stress tests must use the same cell reference format as the application
+   - **Solution:** Updated all cell references to use A1 notation (e.g., "A1" instead of "1:1")
+   - **Best Practice:** Generate column letters correctly for A1 notation
+   - **Example:**
+     ```scala
+     val colLetter = (colNum + 64).toChar.toString // Convert 1 to "A", 2 to "B", etc.
+     ```
+
+### Future Stress Testing Improvements
+1. **Mixed Workload Testing**
+   - Create scenarios that mix read and write operations more extensively
+   - Simulate real-world usage patterns with varying operation types
+   - Test different ratios of reads to writes to find optimal performance
+
+2. **Long-Running Tests**
+   - Implement tests that run for extended periods (hours)
+   - Monitor memory usage and response times over time
+   - Identify potential memory leaks or performance degradation
+
+3. **CI/CD Integration**
+   - Integrate stress tests into CI/CD pipeline
+   - Define performance baselines and regression thresholds
+   - Automatically fail builds that don't meet performance criteria
+
+4. **Monitoring Integration**
+   - Add response time and error rate monitoring to catch performance regressions
+   - Implement real-time dashboards for stress test results
+   - Compare results across test runs to identify trends
+
+5. **Edge Case Testing**
+   - Test with extremely large spreadsheets
+   - Test with complex nested expressions
+   - Test with maximum allowed cell values and ranges
 
 ## Testing Best Practices
 

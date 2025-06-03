@@ -3,7 +3,7 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-04 02:32
+**Last Modified:** 2025-06-04 02:55
 **Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
@@ -18,6 +18,7 @@
 - [Security Considerations](#security-considerations)
 - [Expression Evaluation](#expression-evaluation)
 - [Error Handling](#error-handling)
+- [Stress Testing](#stress-testing)
 
 ## Technology Stack
 ### Core Technologies
@@ -329,6 +330,94 @@ When testing components that use A1 notation, special care is needed for:
 - Simplified verification steps to focus only on essential operations
 - Added proper mocking for dependency creation and deletion
 
+## Stress Testing
+### Gatling Framework
+- **Version:** Gatling 3.10.3
+- **Scala Version:** 2.13.x
+- **Key Features:**
+  - HTTP protocol support
+  - Scenario-based test design
+  - Feeder-based data generation
+  - Comprehensive reporting
+  - Session variable management
+  - Concurrent user simulation
+  - Ramp-up and steady-state load patterns
+
+### Stress Test Module Structure
+```
+stress-test/
+├── build.gradle.kts         # Gradle configuration for stress tests
+├── src/
+│   └── gatling/
+│       ├── scala/           # Scala test implementations
+│       │   └── com/stress/test/simulation/
+│       │       └── SpreadsheetSimulation.scala  # Main simulation file
+│       └── resources/       # Test resources and configuration
+└── run-spreadsheet-test.sh  # Test execution script
+```
+
+### Test Scenarios
+- **Full Workflow Scenario:**
+  - Creates a new sheet
+  - Updates cells with primitive values
+  - Updates cells with expressions
+  - Retrieves cell values
+  - Deletes cells
+  - Shares the sheet with other users
+  - Lists user sheets
+  
+- **Concurrent Primitive Updates Scenario:**
+  - Creates a shared sheet accessible by all test users
+  - Multiple users (20) concurrently update the same set of cells (A1-E5)
+  - Verifies final cell values after concurrent updates
+  
+- **Concurrent Expression Updates Scenario:**
+  - Creates a shared sheet accessible by all test users
+  - Populates base values in cells
+  - Multiple users (20) concurrently update cells with expressions referencing other cells
+  - Verifies final expression evaluation after concurrent updates
+  
+- **Circular Dependency Test Scenario:**
+  - Creates a test sheet
+  - Sets up a circular dependency chain (A1→C1→B1→A1)
+  - Verifies proper error handling for circular references
+
+### Data Generation
+- **User ID Feeder:** Generates consistent user IDs (1-5) for proper access control
+- **Cell Coordinate Feeder:** Generates random cell coordinates and data values
+- **Fixed Cell Feeder:** Provides a limited set of cell coordinates (A1-E5) to force concurrent updates
+- **Expression Feeder:** Generates random cell expressions using A1 notation
+
+### Test Execution
+- **Command:** `./gradlew :stress-test:gatlingRun-com.stress.test.simulation.SpreadsheetSimulation`
+- **Health Check:** Verifies service availability at `/v1/health` before test execution
+- **Report Generation:** Creates HTML reports with detailed performance metrics
+- **Test Duration:** Configurable, default 120 seconds maximum
+
+### Performance Metrics
+- **Request Count:** Total number of API requests executed
+- **Response Times:** Min, max, mean, and percentile response times
+- **Throughput:** Requests per second
+- **Error Rate:** Percentage of failed requests
+- **Status Codes:** Distribution of HTTP status codes
+
+### Test Results (Latest Run)
+- **Total Requests:** 750 requests
+- **Success Rate:** 100% (0 failures)
+- **Response Times:**
+  - Min: 1ms
+  - Max: 255ms
+  - Mean: 24ms
+  - 95th percentile: 102ms
+- **Throughput:** ~26.8 requests/second
+- **Test Duration:** 27 seconds
+
+### Integration with CI/CD
+- **Status:** Planned
+- **Implementation:** Jenkins pipeline stage for automated stress testing
+- **Thresholds:** Performance regression detection based on response time and error rate
+- **Artifacts:** HTML reports stored as build artifacts
+
 ## Monitoring & Logging
 ### Logging
 - SLF4J with Logback
@@ -342,7 +431,7 @@ When testing components that use A1 notation, special care is needed for:
 
 ### Metrics
 - Spring Boot Actuator for basic metrics
-- Health check endpoint at `/api/v1/health`
+- Health check endpoint at `/v1/health`
 - Custom metrics for:
   - Cell update response time
   - Redis cache hit rate

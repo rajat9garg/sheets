@@ -3,7 +3,7 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-04 02:32
+**Last Modified:** 2025-06-04 02:55
 **Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
@@ -19,6 +19,7 @@
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
 - [Scalability Considerations](#scalability-considerations)
 - [Expression Evaluation System](#expression-evaluation-system)
+- [Stress Testing Architecture](#stress-testing-architecture)
 
 ## Architectural Overview
 The Sheets application follows a layered architecture pattern with clear separation between API, service, and repository layers. The application uses Spring Boot as the core framework with PostgreSQL for data persistence, MongoDB for document storage, and Redis for caching.
@@ -781,3 +782,164 @@ private fun evaluateArithmeticExpression(expression: String, context: Map<String
     // Evaluate the processed expression using tokenizer and operator precedence
     // ...
 }
+
+```
+
+## Stress Testing Architecture
+The application includes a comprehensive stress testing framework using Gatling to validate API behavior under load and concurrent access scenarios.
+
+### Stress Test Architecture
+```mermaid
+graph TD
+    GatlingEngine[Gatling Test Engine] --> |HTTP Requests| API[API Layer]
+    
+    subgraph "Gatling Components"
+        Scenarios[Test Scenarios]
+        Feeders[Data Feeders]
+        Assertions[Assertions]
+        Reports[Reports Generator]
+    end
+    
+    subgraph "Test Scenarios"
+        BasicFlow[Full Workflow]
+        ConcurrentPrimitives[Concurrent Primitive Updates]
+        ConcurrentExpressions[Concurrent Expression Updates]
+        CircularDependency[Circular Dependency Test]
+    end
+    
+    Scenarios --> BasicFlow
+    Scenarios --> ConcurrentPrimitives
+    Scenarios --> ConcurrentExpressions
+    Scenarios --> CircularDependency
+    
+    Feeders --> |User IDs| Scenarios
+    Feeders --> |Cell Coordinates| Scenarios
+    Feeders --> |Cell Expressions| Scenarios
+    
+    GatlingEngine --> Scenarios
+    GatlingEngine --> Feeders
+    GatlingEngine --> Assertions
+    GatlingEngine --> Reports
+    
+    API --> |Responses| GatlingEngine
+```
+
+### Stress Test Components
+- **Gatling Engine**: Core test execution engine that manages scenarios, feeders, and HTTP requests
+- **Test Scenarios**: Defined workflows that simulate user behavior
+  - **Full Workflow**: Basic end-to-end flow covering sheet creation, cell updates, retrieval, and deletion
+  - **Concurrent Primitive Updates**: Tests concurrent updates to the same cells with primitive values
+  - **Concurrent Expression Updates**: Tests concurrent updates to cells with expressions that reference other cells
+  - **Circular Dependency Test**: Tests system behavior when circular dependencies are created
+- **Feeders**: Data providers that generate test data
+  - **User ID Feeder**: Provides consistent user IDs for proper access control
+  - **Cell Coordinate Feeder**: Generates random cell coordinates and data
+  - **Fixed Cell Feeder**: Provides a limited set of cell coordinates to force concurrent updates
+  - **Expression Feeder**: Generates random cell expressions using A1 notation
+- **Assertions**: Validates response status codes and content
+- **Reports Generator**: Creates detailed HTML reports with performance metrics
+
+### Stress Test Data Flow
+```mermaid
+sequenceDiagram
+    participant Gatling as Gatling Engine
+    participant Feeder as Data Feeders
+    participant API as API Endpoints
+    participant Service as Service Layer
+    participant DB as Databases
+    
+    Gatling->>Feeder: Request test data
+    Feeder-->>Gatling: Provide user IDs, cell coordinates, expressions
+    
+    Gatling->>API: Create sheet (POST /sheet)
+    API->>Service: Process request
+    Service->>DB: Store sheet
+    DB-->>Service: Confirm storage
+    Service-->>API: Return sheet ID
+    API-->>Gatling: Return 201 Created with sheet ID
+    
+    Gatling->>Feeder: Get cell data
+    Feeder-->>Gatling: Provide cell coordinates and values
+    
+    Gatling->>API: Update cell (POST /sheet/{sheetId}/cell)
+    API->>Service: Process cell update
+    Service->>DB: Store cell data
+    Service->>Service: Update dependent cells
+    DB-->>Service: Confirm storage
+    Service-->>API: Return updated cell
+    API-->>Gatling: Return 200 OK
+    
+    Gatling->>API: Get cell (GET /sheet/{sheetId}/cell/{row}/{column})
+    API->>Service: Retrieve cell
+    Service->>DB: Query cell data
+    DB-->>Service: Return cell data
+    Service-->>API: Return cell
+    API-->>Gatling: Return 200 OK with cell data
+    
+    Gatling->>API: Delete cell (DELETE /sheet/{sheetId}/cell/{row}/{column})
+    API->>Service: Process deletion
+    Service->>DB: Remove cell data
+    DB-->>Service: Confirm deletion
+    Service-->>API: Confirm success
+    API-->>Gatling: Return 204 No Content
+```
+
+### Concurrency Test Pattern
+The stress test implements a specific pattern to test concurrent updates to the same resources:
+
+```mermaid
+graph TD
+    CreateShared[Create Shared Sheet] --> ShareWithUsers[Share With All Test Users]
+    ShareWithUsers --> PopulateBase[Populate Base Values]
+    PopulateBase --> ConcurrentUpdates[Concurrent Updates by Multiple Users]
+    ConcurrentUpdates --> VerifyFinal[Verify Final State]
+    
+    subgraph "Concurrency Test Flow"
+        CreateShared
+        ShareWithUsers
+        PopulateBase
+        ConcurrentUpdates
+        VerifyFinal
+    end
+```
+
+1. **Create Shared Sheet**: A single sheet is created that will be accessed by all test users
+2. **Share With All Users**: The sheet is explicitly shared with all test users with WRITE access
+3. **Populate Base Values**: Initial values are set in cells that will be concurrently updated
+4. **Concurrent Updates**: Multiple users (20+) simultaneously update the same set of cells
+5. **Verify Final State**: The final state of the cells is retrieved and verified
+
+This pattern effectively tests:
+- Locking mechanisms for concurrent cell updates
+- Race conditions in cell value updates
+- Expression evaluation with changing dependencies
+- Conflict resolution in the API layer
+
+### Circular Dependency Test Pattern
+The stress test includes a specific scenario to test circular dependency detection:
+
+```mermaid
+graph TD
+    CreateSheet[Create Test Sheet] --> SetA1[Set A1 to reference C1]
+    SetA1 --> SetB1[Set B1 to reference A1]
+    SetB1 --> SetC1[Set C1 to reference B1]
+    SetC1 --> VerifyError[Verify Error Response]
+    
+    subgraph "Circular Dependency Test"
+        CreateSheet
+        SetA1
+        SetB1
+        SetC1
+        VerifyError
+    end
+```
+
+1. **Create Test Sheet**: A dedicated sheet is created for circular dependency testing
+2. **Set A1 to reference C1**: Cell A1 is set to `=C1+1`
+3. **Set B1 to reference A1**: Cell B1 is set to `=A1+1`
+4. **Set C1 to reference B1**: Cell C1 is set to `=B1+1`, creating a circular dependency (A1→C1→B1→A1)
+5. **Verify Error Response**: The system should detect the circular dependency and return an appropriate error
+
+This pattern tests the system's ability to detect and handle circular dependencies in cell expressions.
+
+{{ ... }}
