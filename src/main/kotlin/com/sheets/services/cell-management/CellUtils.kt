@@ -9,6 +9,10 @@ import com.sheets.services.expression.ExpressionParser
 import com.sheets.services.expression.exception.CircularDependencyException
 import com.sheets.repositories.CellRedisRepository
 import com.sheets.services.CellAsyncService
+import com.sheets.exceptions.SheetLockException
+import com.sheets.exceptions.CellLockException
+import com.sheets.exceptions.CircularReferenceException
+import com.sheets.exceptions.CellDependencyException
 import org.slf4j.LoggerFactory
 import java.time.Instant
 
@@ -71,14 +75,13 @@ object CellUtils {
         try {
             if (!cellLockService.acquireSheetLock(sheetId, userId, LOCK_TIMEOUT_MS)) {
                 val lockOwner = cellLockService.getSheetLockOwner(sheetId)
-                val errorMsg = "Could not acquire lock on sheet: $sheetId. Current lock owner: $lockOwner"
-                throw IllegalStateException(errorMsg)
+                throw SheetLockException(sheetId, lockOwner)
             }
         } catch (e: Exception) {
-            if (e is IllegalStateException) {
+            if (e is SheetLockException) {
                 throw e
             }
-            throw IllegalStateException("Error acquiring sheet lock: ${e.message}")
+            throw SheetLockException(sheetId, null)
         }
     }
     
@@ -128,7 +131,7 @@ object CellUtils {
             val circularPath = circularDependencyDetector.detectCircularDependency(cell.id, allDependencies)
             if (circularPath != null) {
                 val errorMsg = "Circular dependency detected: ${circularPath.joinToString(" -> ")}"
-                throw CircularDependencyException(listOf(errorMsg))
+                throw CircularReferenceException(listOf(errorMsg))
             }
         }
         
@@ -160,21 +163,20 @@ object CellUtils {
             try {
                 if (!cellLockService.acquireLock(cellId, userId, LOCK_TIMEOUT_MS)) {
                     val lockOwner = cellLockService.getLockOwner(cellId)
-                    val errorMsg = "Could not acquire lock on cell: $cellId. Current lock owner: $lockOwner"
                     
                     releaseCellLocks(cellLockService, acquiredLocks, userId)
                     
-                    throw IllegalStateException(errorMsg)
+                    throw CellLockException(cellId, lockOwner)
                 }
                 acquiredLocks.add(cellId)
             } catch (e: Exception) {
-                if (e is IllegalStateException) {
+                if (e is CellLockException) {
                     throw e
                 }
                 
                 releaseCellLocks(cellLockService, acquiredLocks, userId)
                 
-                throw IllegalStateException("Error acquiring lock on cell: $cellId: ${e.message}")
+                throw CellLockException(cellId, null)
             }
         }
         
@@ -194,8 +196,7 @@ object CellUtils {
     fun acquireCellLock(cellLockService: CellLockService, cellId: String, userId: String) {
         if (!cellLockService.acquireLock(cellId, userId, LOCK_TIMEOUT_MS)) {
             val lockOwner = cellLockService.getLockOwner(cellId)
-            val errorMsg = "Could not acquire lock on cell: $cellId. Current lock owner: $lockOwner"
-            throw IllegalStateException(errorMsg)
+            throw CellLockException(cellId, lockOwner)
         }
     }
     
@@ -222,7 +223,7 @@ object CellUtils {
         val dependencies = cellDependencyService.getDependenciesByTargetCellId(cellId)
         if (dependencies.isNotEmpty()) {
             val dependentCellIds = dependencies.map { it.sourceCellId }
-            throw IllegalStateException("Cannot delete cell as it is used in expressions in cells: ${dependentCellIds.joinToString(", ")}")
+            throw CellDependencyException(cellId, dependentCellIds)
         }
     }
     
@@ -276,10 +277,29 @@ object CellUtils {
             }
         } catch (e: CircularDependencyException) {
             logger.error("Circular dependency detected: {}", e.message)
+            throw CircularReferenceException(listOf(e.message ?: "Unknown circular dependency"))
+        } catch (e: CircularReferenceException) {
+            logger.error("Circular dependency detected: {}", e.message)
+            throw e
+        } catch (e: SheetLockException) {
+            // Let lock exceptions propagate up to the controller
+            logger.error("Sheet lock acquisition failed: {}", e.message)
+            throw e
+        } catch (e: CellLockException) {
+            // Let lock exceptions propagate up to the controller
+            logger.error("Cell lock acquisition failed: {}", e.message)
             throw e
         } catch (e: IllegalStateException) {
-            // Let IllegalStateException (lock conflicts) propagate up to the controller
-            logger.error("Lock acquisition failed: {}", e.message)
+            // Convert legacy IllegalStateException to our custom exceptions
+            if (e.message?.contains("lock") == true || e.message?.contains("Lock") == true) {
+                if (e.message?.contains("sheet") == true) {
+                    logger.error("Sheet lock acquisition failed: {}", e.message)
+                    throw SheetLockException(cell.sheetId, null)
+                } else {
+                    logger.error("Cell lock acquisition failed: {}", e.message)
+                    throw CellLockException(cell.id, null)
+                }
+            }
             throw e
         } catch (e: Exception) {
             logger.error("Unexpected error during cell operation: {}", e.message, e)

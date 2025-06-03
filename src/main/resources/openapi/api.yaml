@@ -661,6 +661,11 @@ components:
           format: date-time
           description: Time when the error occurred
           example: "2025-05-24T12:00:00Z"
+        details:
+          type: object
+          description: Additional error details specific to the error type
+          additionalProperties: true
+          example: {"resourceId": "1", "lockOwner": "user123", "retryAfterMs": 5000}
 
     CellRequest:
       $ref: 'schemas/cell.yaml#/components/schemas/CellRequest'

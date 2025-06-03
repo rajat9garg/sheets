@@ -1,8 +1,9 @@
-package com.sheets.controllers
+package com.sheets.exceptions
 
 import com.sheets.generated.model.ErrorResponse
 import com.sheets.services.expression.exception.CircularDependencyException
 import com.sheets.services.expression.exception.ExpressionException
+import com.sheets.exceptions.*
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -59,14 +60,22 @@ class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse)
     }
     
-    @ExceptionHandler(CircularDependencyException::class)
-    fun handleCircularDependencyException(ex: CircularDependencyException): ResponseEntity<ErrorResponse> {
+    @ExceptionHandler(CircularDependencyException::class, CircularReferenceException::class)
+    fun handleCircularDependencyException(ex: Exception): ResponseEntity<ErrorResponse> {
         logger.warn("Circular dependency detected: {}", ex.message)
-        val errorResponse = createErrorResponse(
+        
+        val details = when (ex) {
+            is CircularReferenceException -> ex.details
+            else -> null
+        }
+        
+        val errorResponse = createErrorResponseWithDetails(
             HttpStatus.BAD_REQUEST.value(),
             "Circular Dependency",
-            ex.message ?: "Circular dependency detected in cell references"
+            ex.message ?: "Circular dependency detected in cell references",
+            details
         )
+        
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
             .header("X-Error-Reason", "CIRCULAR_DEPENDENCY")
@@ -84,20 +93,84 @@ class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse)
     }
     
+    @ExceptionHandler(ResourceLockException::class, SheetLockException::class, CellLockException::class)
+    fun handleLockException(ex: SheetException): ResponseEntity<ErrorResponse> {
+        logger.warn("Lock conflict: {}", ex.message)
+        
+        val errorResponse = createErrorResponseWithDetails(
+            HttpStatus.CONFLICT.value(),
+            "Resource Locked",
+            ex.message ?: "Resource is locked by another user",
+            ex.details
+        )
+        
+        val headers = mutableMapOf<String, String>()
+        headers["X-Error-Reason"] = "RESOURCE_LOCKED"
+        
+        if (ex is ResourceLockException) {
+            headers["Retry-After"] = "${ex.retryAfterMs / 1000}"
+        }
+        
+        val responseBuilder = ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .body(errorResponse)
+        
+        headers.forEach { (key, value) ->
+            responseBuilder.headers.add(key, value)
+        }
+        
+        return responseBuilder
+    }
+    
+    @ExceptionHandler(CellDependencyException::class)
+    fun handleCellDependencyException(ex: CellDependencyException): ResponseEntity<ErrorResponse> {
+        logger.warn("Cell dependency issue: {}", ex.message)
+        
+        val errorResponse = createErrorResponseWithDetails(
+            HttpStatus.CONFLICT.value(),
+            "Cell Dependency Conflict",
+            ex.message ?: "Cell has dependencies that prevent this operation",
+            ex.details
+        )
+        
+        return ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .header("X-Error-Reason", "CELL_DEPENDENCY")
+            .body(errorResponse)
+    }
+    
+    @ExceptionHandler(PersistenceException::class)
+    fun handlePersistenceException(ex: PersistenceException): ResponseEntity<ErrorResponse> {
+        logger.error("Persistence error: {}", ex.message)
+        
+        val errorResponse = createErrorResponseWithDetails(
+            HttpStatus.INTERNAL_SERVER_ERROR.value(),
+            "Persistence Error",
+            ex.message ?: "Error persisting data",
+            ex.details
+        )
+        
+        return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .header("X-Error-Reason", "PERSISTENCE_ERROR")
+            .body(errorResponse)
+    }
+    
     @ExceptionHandler(IllegalStateException::class)
     fun handleIllegalStateException(ex: IllegalStateException): ResponseEntity<ErrorResponse> {
-        logger.warn("Lock conflict or other illegal state: {}", ex.message)
+        logger.warn("Illegal state: {}", ex.message)
         
         // Check if this is a lock conflict
         if (ex.message?.contains("lock") == true || ex.message?.contains("Lock") == true) {
             val errorResponse = createErrorResponse(
                 HttpStatus.CONFLICT.value(),
                 "Resource Conflict",
-                ex.message ?: "Resource is locked by another user"
+                "Please try again in a few moments. The resource is currently being modified by another user."
             )
             return ResponseEntity
                 .status(HttpStatus.CONFLICT)
                 .header("X-Error-Reason", "RESOURCE_LOCKED")
+                .header("Retry-After", "5")
                 .body(errorResponse)
         }
         
@@ -116,7 +189,7 @@ class GlobalExceptionHandler {
         val errorResponse = createErrorResponse(
             HttpStatus.INTERNAL_SERVER_ERROR.value(),
             "Internal Server Error",
-            "An unexpected error occurred"
+            "An unexpected error occurred. Please try again later."
         )
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse)
     }
@@ -128,5 +201,26 @@ class GlobalExceptionHandler {
             message = message,
             timestamp = OffsetDateTime.now()
         )
+    }
+    
+    private fun createErrorResponseWithDetails(
+        status: Int, 
+        error: String, 
+        message: String,
+        details: Map<String, Any>?
+    ): ErrorResponse {
+        // Note: This assumes ErrorResponse has a details field
+        // If it doesn't, you'll need to modify the OpenAPI spec and regenerate the model
+        val response = createErrorResponse(status, error, message)
+        
+        // Add details if the ErrorResponse class supports it
+        // If not, this will need to be modified after updating the ErrorResponse class
+        if (details != null) {
+            // This is a placeholder - the actual implementation depends on your ErrorResponse structure
+            // You may need to modify this after updating your ErrorResponse model
+            return response
+        }
+        
+        return response
     }
 }
