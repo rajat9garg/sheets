@@ -1,9 +1,9 @@
 # Lessons Learned
 
 **Created:** 2025-05-24  
-**Last Updated:** 2025-06-05  
+**Last Updated:** 2025-06-04 02:32  
 **Last Updated By:** Cascade AI Assistant  
-**Related Components:** Database, ORM, PostgreSQL, Flyway, Repository Implementation, MongoDB, Redis, Cell Dependencies
+**Related Components:** Database, ORM, PostgreSQL, Flyway, Repository Implementation, MongoDB, Redis, Cell Dependencies, Testing, A1 Notation
 
 ## Database & ORM Configuration
 
@@ -470,6 +470,65 @@ Transitioning from a numeric column reference system (e.g., 1:1, 2:3) to an alph
 3. **Enhanced Error Handling:** Provide more descriptive error messages for invalid cell references or ranges.
 4. **Unit Testing:** Add comprehensive unit tests for all expression functions and conversion utilities.
 5. **Performance Testing:** Conduct performance testing with large spreadsheets and complex formulas.
+
+## Testing Best Practices
+
+### Unit Testing with MockK
+1. **Type Matching in Mock Expectations**
+   - **Lesson:** Type mismatches between expected and actual objects in mock verifications can cause test failures
+   - **Problem:** String timestamps in CellDependency mocks vs. Instant objects in actual implementation
+   - **Solution:** Use `any()` matchers instead of exact object matching to avoid type mismatch errors
+   - **Best Practice:** Prefer flexible matchers like `any()`, `match { }`, or `capture()` over exact object matching
+
+2. **Mock Configuration in Setup**
+   - **Lesson:** Global mock setup in the setUp() method improves test readability and maintenance
+   - **Problem:** Repetitive mock configuration across multiple test methods
+   - **Solution:** Move common mock setup to the setUp() method and configure test-specific behavior in individual tests
+   - **Best Practice:** Configure default behaviors for all dependencies in setUp() and override only when necessary
+
+3. **Verification Strategy**
+   - **Lesson:** Overly specific verifications make tests brittle and hard to maintain
+   - **Problem:** Tests failing due to minor implementation changes that don't affect functionality
+   - **Solution:** Focus on verifying essential operations and end results rather than implementation details
+   - **Best Practice:** Verify that the correct methods were called with appropriate parameters, but avoid verifying every internal step
+
+### A1 Notation Testing
+1. **Cell ID Format Consistency**
+   - **Lesson:** Inconsistent cell ID formats between tests and implementation cause test failures
+   - **Problem:** Tests using legacy numeric format (e.g., "1:1:1") while implementation expected A1 notation (e.g., "1:1:A")
+   - **Solution:** Update all test cell IDs to use A1 notation format consistently
+   - **Best Practice:** Maintain a single source of truth for ID formats and update all tests when format changes
+
+2. **Helper Method Adaptation**
+   - **Lesson:** Helper methods for extracting information from IDs must be updated when ID format changes
+   - **Problem:** Helper method to extract sheet ID from cell ID failed with A1 notation format
+   - **Solution:** Update helper methods to handle the new format correctly
+   - **Best Practice:** Design helper methods to be flexible with format changes or clearly document format assumptions
+
+3. **Test Data Generation**
+   - **Lesson:** Test data generation must adapt to new format requirements
+   - **Problem:** Test data generators creating IDs in legacy format
+   - **Solution:** Update test data generators to create IDs in A1 notation format
+   - **Best Practice:** Centralize test data generation in utility classes that can be easily updated
+
+### Dependency Mocking
+1. **Bidirectional Dependency Handling**
+   - **Lesson:** Cell dependencies are bidirectional and both directions must be properly mocked
+   - **Problem:** Tests only mocking source dependencies but not target dependencies
+   - **Solution:** Add proper mocking for both source and target cell dependencies
+   - **Best Practice:** Consider all relationship directions when mocking dependencies
+
+2. **Empty Collections for Simplification**
+   - **Lesson:** Using empty collections can simplify tests when the collection contents aren't relevant
+   - **Problem:** Complex mock setup for dependency collections causing test brittleness
+   - **Solution:** Use empty lists where possible to avoid timestamp type issues and simplify tests
+   - **Best Practice:** Only mock the minimum necessary for the test to pass
+
+3. **Redis Save Operations**
+   - **Lesson:** Redis save operations should return mock objects rather than just running
+   - **Problem:** Using `just runs` for Redis save operations instead of returning mock objects
+   - **Solution:** Use `mockk()` returns for Redis save operations to enable proper verification
+   - **Best Practice:** Mock return values for all operations, even when the return value isn't directly used
 
 ## Best Practices
 

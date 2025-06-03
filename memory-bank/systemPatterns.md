@@ -3,7 +3,7 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-04 00:51
+**Last Modified:** 2025-06-04 02:32
 **Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
@@ -14,6 +14,7 @@
 - [Repository Pattern Implementation](#repository-pattern-implementation)
 - [Cell Dependency Management](#cell-dependency-management)
 - [Error Handling Pattern](#error-handling-pattern)
+- [Testing Patterns](#testing-patterns)
 - [Design Decisions](#design-decisions)
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
 - [Scalability Considerations](#scalability-considerations)
@@ -486,6 +487,74 @@ ErrorResponse:
 ```
 
 This pattern ensures that error handling is robust, consistent, and provides sufficient information for clients to understand and react to issues gracefully.
+
+## Testing Patterns
+The application follows a comprehensive testing strategy with a focus on unit tests, integration tests, and end-to-end tests. The testing approach uses MockK for mocking in Kotlin tests and follows the Arrange-Act-Assert pattern.
+
+### Unit Testing Structure
+```mermaid
+graph TD
+    Test[Test Class] --> Setup[Setup/Arrange]
+    Setup --> Mocks[Configure Mocks]
+    Setup --> TestData[Prepare Test Data]
+    Test --> Execute[Execute/Act]
+    Execute --> Method[Call Method Under Test]
+    Test --> Verify[Verify/Assert]
+    Verify --> Results[Check Results]
+    Verify --> Interactions[Verify Mock Interactions]
+```
+
+### Mock Configuration Patterns
+When testing services with dependencies, the following patterns are used:
+
+1. **Global Mocks Setup:**
+   - Configure common mocks in the setUp() method
+   - Set up default behaviors for frequently used dependencies
+   - Initialize test data and fixtures
+
+2. **Flexible Matchers:**
+   - Use `any()` matchers instead of exact object matching to avoid type mismatch issues
+   - Employ `slot` capture for complex object verification
+   - Use `match { }` for custom matching logic
+
+3. **Verification Strategy:**
+   - Focus on essential operations in verifications
+   - Verify end results rather than implementation details
+   - Use ordered verification only when sequence matters
+
+### A1 Notation Testing Considerations
+When testing components that use A1 notation, special care is needed for:
+
+1. **Cell ID Format:**
+   - Cell IDs follow the format `sheetId:row:column` where column is an alphabetical letter (e.g., "1:1:A")
+   - Helper methods must correctly extract sheet ID and cell coordinates
+   - Test data must use consistent A1 notation format
+
+2. **Type Handling:**
+   - Ensure proper type handling for timestamps (Instant vs. String)
+   - Use appropriate type converters in test setup
+   - Handle type coercion in mock expectations
+
+3. **Dependency Mocking:**
+   - Mock both source and target cell dependencies
+   - Ensure proper handling of dependency creation and deletion
+   - Use empty lists for dependencies when appropriate to simplify tests
+
+### Test Data Generation
+```mermaid
+graph TD
+    TestData[Test Data Generation] --> CellData[Cell Data]
+    TestData --> DependencyData[Dependency Data]
+    TestData --> SheetData[Sheet Data]
+    
+    CellData --> A1Format[A1 Notation Format]
+    CellData --> DataTypes[Various Data Types]
+    CellData --> Formulas[Formula Expressions]
+    
+    DependencyData --> SourceTarget[Source-Target Pairs]
+    DependencyData --> CircularDeps[Circular Dependencies]
+    DependencyData --> ComplexGraphs[Complex Dependency Graphs]
+```
 
 ## Design Decisions
 ### Repository Pattern

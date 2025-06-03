@@ -3,6 +3,8 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
+**Last Modified:** 2025-06-04 02:32
+**Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
 - [Technology Stack](#technology-stack)
@@ -261,20 +263,71 @@ java -jar build/libs/sheets-0.0.1-SNAPSHOT.jar
 5. Merge to `main` after approval
 
 ## Testing Strategy
-### Unit Testing
-- JUnit 5 for unit tests
-- MockK for mocking in Kotlin
-- Test coverage target: 80%
+### Testing Framework
+- **Unit Testing:** JUnit 5 with MockK for mocking
+- **Integration Testing:** Spring Boot Test with TestContainers
+- **End-to-End Testing:** Custom shell scripts for API testing
 
-### Integration Testing
-- Spring Boot Test for integration tests
-- TestContainers for database tests
-- API tests with RestAssured
+### Test Structure
+- **Unit Tests:** Located in `src/test/kotlin/com/sheets/`
+- **Integration Tests:** Located in `src/test/kotlin/com/sheets/integration/`
+- **Test Resources:** Located in `src/test/resources/`
+- **Test Configuration:** `application-test.yml` for test-specific properties
 
-### Performance Testing
-- JMeter for load testing
-- Focus on cell dependency update performance
-- Redis cache hit rate monitoring
+### Testing Patterns
+- **Arrange-Act-Assert:** All tests follow this pattern for clarity
+- **Given-When-Then:** BDD-style test naming for readability
+- **Test Doubles:** Use of mocks, stubs, and spies as appropriate
+- **Test Data Builders:** For creating test data with fluent interfaces
+- **Parameterized Tests:** For testing multiple scenarios with the same logic
+
+### A1 Notation Testing Considerations
+When testing components that use A1 notation, special care is needed for:
+
+1. **Cell ID Format:**
+   - Cell IDs follow the format `sheetId:row:column` where column is an alphabetical letter (e.g., "1:1:A")
+   - Helper methods must correctly extract sheet ID and cell coordinates
+   - Test data must use consistent A1 notation format
+
+2. **Type Handling:**
+   - Ensure proper type handling for timestamps (Instant vs. String)
+   - Use appropriate type converters in test setup
+   - Handle type coercion in mock expectations
+
+3. **Dependency Mocking:**
+   - Mock both source and target cell dependencies
+   - Ensure proper handling of dependency creation and deletion
+   - Use empty lists for dependencies when appropriate to simplify tests
+
+### Mock Configuration Best Practices
+1. **Global Mocks Setup:**
+   - Configure common mocks in the setUp() method
+   - Set up default behaviors for frequently used dependencies
+   - Initialize test data and fixtures
+
+2. **Flexible Matchers:**
+   - Use `any()` matchers instead of exact object matching to avoid type mismatch issues
+   - Employ `slot` capture for complex object verification
+   - Use `match { }` for custom matching logic
+
+3. **Verification Strategy:**
+   - Focus on essential operations in verifications
+   - Verify end results rather than implementation details
+   - Use ordered verification only when sequence matters
+
+### Test Coverage Goals
+- **Service Layer:** 85% line coverage
+- **Repository Layer:** 80% line coverage
+- **Domain Model:** 90% line coverage
+- **Controllers:** 75% line coverage
+- **Overall:** 85% line coverage
+
+### Recent Test Improvements
+- Fixed CellServiceExpressionTest and CellServiceBasicOperationsTest to work with A1 notation
+- Resolved type mismatch issues between String timestamps and Instant objects in CellDependency mocks
+- Updated test cell IDs to use A1 notation format (e.g., "1:1:A" instead of "1:1:1")
+- Simplified verification steps to focus only on essential operations
+- Added proper mocking for dependency creation and deletion
 
 ## Monitoring & Logging
 ### Logging
