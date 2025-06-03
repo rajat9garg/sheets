@@ -13,9 +13,9 @@ components:
           description: Row index of the cell
           example: 1
         column:
-          type: integer
-          description: Column index of the cell
-          example: 1
+          type: string
+          description: Column identifier in alphabetical notation (A, B, C, ... AA, AB, etc.)
+          example: "A"
         data:
           type: string
           description: Cell content (primitive value or expression)
@@ -38,9 +38,9 @@ components:
           description: Row index of the cell
           example: 1
         column:
-          type: integer
-          description: Column index of the cell
-          example: 1
+          type: string
+          description: Column identifier in alphabetical notation (A, B, C, ... AA, AB, etc.)
+          example: "A"
         data:
           type: string
           description: Raw cell content (primitive value or expression)
@@ -84,9 +84,9 @@ components:
                 description: Row index of the cell
                 example: 1
               column:
-                type: integer
-                description: Column index of the cell
-                example: 1
+                type: string
+                description: Column identifier in alphabetical notation (A, B, C, ... AA, AB, etc.)
+                example: "A"
               data:
                 type: string
                 description: Cell content (primitive value or expression)

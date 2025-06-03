@@ -3,7 +3,7 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-02
+**Last Modified:** 2025-06-03
 **Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
@@ -16,6 +16,7 @@
 - [Testing Strategy](#testing-strategy)
 - [Monitoring & Logging](#monitoring--logging)
 - [Security Considerations](#security-considerations)
+- [Expression Evaluation](#expression-evaluation)
 
 ## Technology Stack
 ### Core Technologies
@@ -24,21 +25,10 @@
 - **Programming Languages:** Kotlin 1.9.25, Java 17
 - **Build Tool:** Gradle 8.13
 
-### Database & ORM
-- **Relational Database:** PostgreSQL 15.13 (downgraded from 16.9 for compatibility)
-- **Document Database:** MongoDB 6.0 for cell and dependency storage
-- **Cache:** Redis 7.0 for dependency caching
-- **ORM Framework:** JOOQ 3.19.3 for PostgreSQL
-- **MongoDB Client:** Spring Data MongoDB
-- **Redis Client:** Spring Data Redis with Lettuce
-- **Database Migration:** Flyway 9.16.1
-  - Migration Location: `src/main/resources/db/migration`
-  - Schema: `public`
-  - Migration Table: `flyway_schema_history`
-  - Clean Disabled: `true` (safety measure)
-  - Baseline on Migrate: `true`
-
 ### Important Notes
+- **Alphabetical Column Notation:** System uses A1 style notation (e.g., A1, B2, C3) for cell references
+- **Cell ID Format:** Cell IDs follow the format `sheetId:row:column` where column is an alphabetical letter
+- **Expression Evaluation:** Supports arithmetic operations, function calls, cell references, and ranges
 - **PostgreSQL Enum Types:** Custom enum type `access_type` with values `READ`, `WRITE`, `ADMIN`, `OWNER`
 - **Foreign Key Constraints:** Removed foreign key constraints on `sheets.user_id` and `access_mappings.user_id` to enable development flexibility
 - **ID Type Handling:** Domain models use UUID for IDs while some database tables use BIGINT
@@ -46,7 +36,7 @@
 - **Redis Caching:** Cell dependencies cached with 24-hour TTL
 - **Asynchronous Processing:** Using Spring's @Async for dependent cell updates
 
-#### JOOQ Configuration
+### JOOQ Configuration
 - **Version:** 3.19.3 (OSS Edition)
 - **Generated Code Location:** `build/generated/jooq`
 - **Target Package:** `com.sheets.infrastructure.jooq`
@@ -123,11 +113,12 @@
 
 ### MongoDB Collections
 #### cells
-- **Primary Key:** `id` (String, format: "sheetId:cellRef")
+- **Primary Key:** `id` (String, format: "sheetId:row:column")
 - **Fields:**
   - `id` - String, Primary Key
   - `sheetId` - Long
-  - `cellRef` - String (e.g., "A1", "B2")
+  - `row` - Integer
+  - `column` - String (alphabetical column identifier, e.g., "A", "B", "C")
   - `data` - String (raw formula or value)
   - `evaluatedValue` - String (calculated result)
   - `dataType` - Enum ('STRING', 'NUMBER', 'BOOLEAN', 'ERROR', 'FORMULA')
@@ -315,3 +306,19 @@ java -jar build/libs/sheets-0.0.1-SNAPSHOT.jar
 ### API Security
 - Basic input validation
 - No rate limiting yet
+
+## Expression Evaluation
+### Expression Functions
+- **SUM:** Calculates the sum of values in cell references and ranges
+- **AVERAGE:** Calculates the average of values in cell references and ranges
+- **MIN:** Finds the minimum value among cell references and ranges
+- **MAX:** Finds the maximum value among cell references and ranges
+
+### Cell Reference Formats
+- **A1 Notation:** Uses alphabetical column and numeric row (e.g., A1, B2, C3)
+- **Legacy Numeric Notation:** Uses row:column format (e.g., 1:1, 2:3)
+- **Cell Ranges:** Supports both A1 notation (e.g., A1:C3) and legacy format (e.g., 1:1-3:3)
+
+### Column Conversion Utilities
+- **Column Letter to Number:** Converts alphabetical column to numeric index
+- **Column Number to Letter:** Converts numeric index to alphabetical column

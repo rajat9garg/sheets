@@ -382,6 +382,95 @@
    - **Solution:** Implemented caching of intermediate results and asynchronous updates
    - **Best Practice:** Use a combination of caching and async processing for optimal performance
 
+## Alphabetical Column Notation Implementation
+
+### Challenge
+Transitioning from a numeric column reference system (e.g., 1:1, 2:3) to an alphabetical column notation (A1 style) throughout the application presented several challenges:
+
+1. **Consistent Reference Format:** Ensuring all components (expression evaluation, cell storage, API) use the same reference format
+2. **Backward Compatibility:** Supporting legacy numeric references while transitioning to A1 notation
+3. **Range Processing:** Handling cell ranges in both formats (e.g., A1:C3 and 1:1-3:3)
+4. **Column Conversion:** Converting between alphabetical columns and numeric indices
+5. **Dependency Management:** Updating dependency tracking to work with the new reference format
+
+### Solution
+1. **Unified Reference Format:**
+   - Standardized on A1 notation (e.g., A1, B2, C3) as the primary reference format
+   - Updated cell ID format to use `sheetId:row:column` where column is an alphabetical letter
+   - Modified expression evaluation to directly handle A1 notation
+
+2. **Conversion Utilities:**
+   - Implemented utility functions to convert between column letters and numbers:
+     ```kotlin
+     fun columnLetterToNumber(columnLetter: String): Int {
+         var result = 0
+         for (c in columnLetter) {
+             result = result * 26 + (c - 'A' + 1)
+         }
+         return result
+     }
+     
+     fun numberToColumnLetter(columnNumber: Int): String {
+         var dividend = columnNumber
+         var columnName = ""
+         
+         while (dividend > 0) {
+             val modulo = (dividend - 1) % 26
+             columnName = (modulo + 'A'.code).toChar() + columnName
+             dividend = (dividend - modulo) / 26
+         }
+         
+         return columnName
+     }
+     ```
+
+3. **Expression Function Enhancement:**
+   - Rewrote SUM, AVERAGE, MIN, and MAX functions to support:
+     - A1 notation cell references (e.g., A1, B2)
+     - A1 notation ranges (e.g., A1:C3)
+     - Legacy numeric references (e.g., 1:1)
+     - Legacy numeric ranges (e.g., 1:1-3:3)
+   - Added detailed logging for easier debugging
+
+4. **Arithmetic Expression Evaluation:**
+   - Modified the expression evaluator to directly replace A1 references with their values
+   - Used regex pattern matching to identify A1 references in expressions
+   - Avoided unnecessary conversion between reference formats
+
+5. **Dependency Management:**
+   - Updated dependency tracking to work with A1 notation
+   - Ensured automatic updates propagate correctly when referenced cells change
+   - Maintained dependency enforcement to prevent deletion of referenced cells
+
+### Lessons Learned
+1. **Consistent Reference Format:** Using a standardized reference format throughout the application simplifies code and reduces conversion errors. A1 notation is more user-friendly and aligns with industry standards.
+
+2. **Backward Compatibility:** When transitioning to a new reference format, maintaining backward compatibility is crucial. Converting legacy references internally allows for a smooth transition without breaking existing functionality.
+
+3. **Regex Pattern Matching:** Using regex for identifying and extracting cell references is powerful but requires careful testing with various input patterns. The pattern `([A-Z]+)(\\d+)` effectively captures A1 notation references.
+
+4. **Function Implementation Pattern:** Following a consistent pattern across all expression functions (SUM, AVERAGE, MIN, MAX) reduces code duplication and makes maintenance easier. Each function follows the same steps for argument processing and cell value retrieval.
+
+5. **Detailed Logging:** Adding detailed logging throughout the expression evaluation process greatly simplifies debugging and troubleshooting. Logging each step of the evaluation process, including reference conversion and value retrieval, provides valuable insights.
+
+6. **Testing Strategy:** Comprehensive testing is essential when making fundamental changes to reference formats. Testing should cover:
+   - Direct cell references (e.g., A1)
+   - Cell ranges (e.g., A1:C3)
+   - Legacy numeric references (e.g., 1:1)
+   - Legacy numeric ranges (e.g., 1:1-3:3)
+   - Mixed formats in the same expression
+   - Automatic updates when referenced cells change
+   - Dependency enforcement
+
+7. **Performance Considerations:** Converting between reference formats can impact performance, especially with large spreadsheets. Minimizing conversions and using efficient algorithms is important for maintaining good performance.
+
+### Future Improvements
+1. **Refactor Common Code:** Extract common functionality from expression functions into utility methods to reduce duplication.
+2. **Optimize Range Processing:** Improve the efficiency of processing large cell ranges.
+3. **Enhanced Error Handling:** Provide more descriptive error messages for invalid cell references or ranges.
+4. **Unit Testing:** Add comprehensive unit tests for all expression functions and conversion utilities.
+5. **Performance Testing:** Conduct performance testing with large spreadsheets and complex formulas.
+
 ## Best Practices
 
 ### Database Design

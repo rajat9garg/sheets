@@ -3,7 +3,7 @@
 **Created:** 2025-05-24  
 **Status:** [ACTIVE]  
 **Author:** [Your Name]  
-**Last Modified:** 2025-06-02
+**Last Modified:** 2025-06-03
 **Last Updated By:** Cascade AI Assistant
 
 ## Table of Contents
@@ -16,6 +16,7 @@
 - [Design Decisions](#design-decisions)
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
 - [Scalability Considerations](#scalability-considerations)
+- [Expression Evaluation System](#expression-evaluation-system)
 
 ## Architectural Overview
 The Sheets application follows a layered architecture pattern with clear separation between API, service, and repository layers. The application uses Spring Boot as the core framework with PostgreSQL for data persistence, MongoDB for document storage, and Redis for caching.
@@ -397,6 +398,185 @@ graph TD
     RemoveFromSourceSet --> RemoveFromTargetSet[Remove from Target Set]
     RemoveFromTargetSet --> RemoveFromSheetSet[Remove from Sheet Set]
     RemoveFromSheetSet --> DeleteKey[Delete Key]
+```
+
+## Expression Evaluation System
+The expression evaluation system is responsible for parsing and evaluating formulas in cells. It supports arithmetic operations, function calls, cell references, and cell ranges.
+
+### Expression Evaluation Flow
+```mermaid
+graph TD
+    Cell[Cell with Expression] --> ExpressionService[ExpressionService]
+    ExpressionService --> ExpressionEvaluator[ExpressionEvaluator]
+    ExpressionEvaluator --> |Function Call?| FunctionRegistry[FunctionRegistry]
+    ExpressionEvaluator --> |Arithmetic?| ArithmeticEvaluator[Arithmetic Evaluator]
+    FunctionRegistry --> |Lookup Function| ExpressionFunction[ExpressionFunction]
+    ExpressionFunction --> |Evaluate| CellService[CellService]
+    CellService --> |Get Cell Values| CellRepository[CellRepository]
+    ArithmeticEvaluator --> |Replace Cell References| CellService
+    ExpressionEvaluator --> |Result| Cell
+```
+
+### Alphabetical Column Notation (A1 Style)
+The system uses alphabetical column notation (A1 style) for cell references, which is the industry standard for spreadsheet applications. This notation uses letters for columns (A, B, C, ..., Z, AA, AB, ...) and numbers for rows (1, 2, 3, ...).
+
+#### Cell Reference Format
+```
+[Column Letter][Row Number]
+```
+Examples: A1, B2, C3, AA10, etc.
+
+#### Cell Range Format
+```
+[Start Cell]:[End Cell]
+```
+Examples: A1:C3, B2:D5, etc.
+
+#### Implementation Details
+```mermaid
+graph TD
+    A1Reference[A1 Reference] --> |Parse| ColumnLetter[Column Letter]
+    A1Reference --> |Parse| RowNumber[Row Number]
+    ColumnLetter --> |Convert| ColumnNumber[Column Number]
+    ColumnNumber --> |Convert| ColumnLetter
+    A1Reference --> |Format Cell ID| CellID[sheetId:row:column]
+    CellID --> CellRepository[CellRepository]
+```
+
+#### Conversion Functions
+The system includes utility functions to convert between column letters and column numbers:
+
+1. **Column Letter to Number**:
+   ```kotlin
+   fun columnLetterToNumber(columnLetter: String): Int {
+       var result = 0
+       for (c in columnLetter) {
+           result = result * 26 + (c - 'A' + 1)
+       }
+       return result
+   }
+   ```
+
+2. **Column Number to Letter**:
+   ```kotlin
+   fun numberToColumnLetter(columnNumber: Int): String {
+       var dividend = columnNumber
+       var columnName = ""
+       
+       while (dividend > 0) {
+           val modulo = (dividend - 1) % 26
+           columnName = (modulo + 'A'.code).toChar() + columnName
+           dividend = (dividend - modulo) / 26
+       }
+       
+       return columnName
+   }
+   ```
+
+### Expression Functions
+The system supports various expression functions for formula evaluation. Each function implements the `ExpressionFunction` interface and is registered with the `FunctionRegistry`.
+
+```mermaid
+classDiagram
+    class ExpressionFunction {
+        <<interface>>
+        +name() String
+        +evaluate(args: List<String>) String
+    }
+    
+    ExpressionFunction <|-- SumFunction
+    ExpressionFunction <|-- AverageFunction
+    ExpressionFunction <|-- MinFunction
+    ExpressionFunction <|-- MaxFunction
+    
+    class SumFunction {
+        -cellService: CellService
+        +name() String
+        +evaluate(args: List<String>) String
+    }
+    
+    class AverageFunction {
+        -cellService: CellService
+        +name() String
+        +evaluate(args: List<String>) String
+    }
+    
+    class MinFunction {
+        -cellService: CellService
+        +name() String
+        +evaluate(args: List<String>) String
+    }
+    
+    class MaxFunction {
+        -cellService: CellService
+        +name() String
+        +evaluate(args: List<String>) String
+    }
+    
+    class FunctionRegistry {
+        <<interface>>
+        +registerFunction(function: ExpressionFunction) void
+        +getFunction(name: String) ExpressionFunction?
+    }
+    
+    class FunctionRegistryImpl {
+        -functions: Map<String, ExpressionFunction>
+        +registerFunction(function: ExpressionFunction) void
+        +getFunction(name: String) ExpressionFunction?
+    }
+    
+    FunctionRegistry <|-- FunctionRegistryImpl
+    FunctionRegistryImpl --> ExpressionFunction : contains
+```
+
+#### Function Evaluation Process
+Each expression function follows a similar pattern for evaluating cell references and ranges:
+
+1. Extract sheetId from arguments if provided
+2. Process each argument:
+   - If it's a direct number, use it as is
+   - If it's an A1 notation cell reference (e.g., A1), look up the cell value
+   - If it's an A1 notation range (e.g., A1:C3), process all cells in the range
+   - If it's a legacy numeric reference (e.g., 1:1), convert to A1 notation and look up the cell value
+   - If it's a legacy numeric range (e.g., 1:1-3:3), convert to A1 notation and process all cells in the range
+3. Apply the function logic to the collected values
+4. Return the result as a string
+
+### Arithmetic Expression Evaluation
+Arithmetic expressions are evaluated using a tokenizer and operator precedence logic. The system supports standard operators (+, -, *, /, parentheses) and cell references.
+
+```mermaid
+graph TD
+    Expression[Arithmetic Expression] --> Tokenizer[Tokenize Expression]
+    Tokenizer --> ReplaceReferences[Replace Cell References]
+    ReplaceReferences --> |A1 References| CellLookup[Look up Cell Values]
+    CellLookup --> TokenizedExpression[Tokenized Expression]
+    TokenizedExpression --> EvaluateExpression[Evaluate with Operator Precedence]
+    EvaluateExpression --> Result[Result]
+```
+
+#### Cell Reference Replacement
+Before evaluating an arithmetic expression, all cell references are replaced with their actual values:
+
+```kotlin
+private fun evaluateArithmeticExpression(expression: String, context: Map<String, String>): String {
+    var processedExpression = expression
+    val a1Pattern = "([A-Z]+)(\\d+)".toRegex()
+    val a1Matches = a1Pattern.findAll(processedExpression)
+    
+    for (match in a1Matches) {
+        val cellRef = match.value
+        if (cellRef in context) {
+            val value = context[cellRef] ?: "0"
+            processedExpression = processedExpression.replace(cellRef, value)
+        } else {
+            processedExpression = processedExpression.replace(cellRef, "0")
+        }
+    }
+    
+    // Evaluate the processed expression using tokenizer and operator precedence
+    // ...
+}
 ```
 
 ## Design Decisions

@@ -346,8 +346,8 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
-          description: Column index of the cell
+            type: string
+          description: Column identifier in alphabetical notation (A, B, C, ... AA, AB, etc.)
         - name: X-User-ID
           in: header
           required: true
@@ -405,8 +405,8 @@ paths:
           in: path
           required: true
           schema:
-            type: integer
-          description: Column index of the cell
+            type: string
+          description: Column identifier in alphabetical notation (A, B, C, ... AA, AB, etc.)
         - name: X-User-ID
           in: header
           required: true
@@ -430,83 +430,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Conflict - Cell is locked by another user
+          description: Conflict - Cell is locked by another user or has dependencies
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
+          headers:
+            X-Error-Reason:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /sheet/{sheetId}/cell/{cellId}:
-    post:
-      summary: Update a cell by its ID
-      description: Updates an existing cell in a sheet using its direct cell ID.
-      operationId: updateCellById
-      tags:
-        - Cell
-      parameters:
-        - name: sheetId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-          description: ID of the sheet
-        - name: cellId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: ID of the cell to update (format sheetId:row:column)
-        - name: X-User-ID
-          in: header
-          required: true
-          schema:
-            type: integer
-            format: int64
-          description: ID of the user making the request
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CellDataRequest'
-      responses:
-        '200':
-          description: Cell updated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CellResponse'
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CellErrorResponse'
-        '403':
-          description: Forbidden - User does not have write access
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Sheet or cell not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Conflict - Cell is locked by another user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                type: string
+                enum: [CELL_LOCKED, CELL_HAS_DEPENDENCIES]
+              description: Specific reason for the conflict - CELL_LOCKED if the cell is locked by another user, CELL_HAS_DEPENDENCIES if the cell is used in expressions
         '500':
           description: Internal server error
           content:

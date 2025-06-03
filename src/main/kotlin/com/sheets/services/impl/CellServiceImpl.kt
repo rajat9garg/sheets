@@ -1,17 +1,12 @@
 package com.sheets.services.impl
 
 import com.sheets.models.domain.Cell
-import com.sheets.models.domain.CellDependency
-import com.sheets.models.domain.DataType
 import com.sheets.repositories.CellRedisRepository
 import com.sheets.repositories.CellRepository
 import com.sheets.services.*
 import com.sheets.services.`cell-management`.CellUtils
 import com.sheets.services.`cell-management`.ExpressionDataProcessor
 import com.sheets.services.`cell-management`.PrimitiveDataProcessor
-import com.sheets.services.expression.ExpressionEvaluator
-import com.sheets.services.expression.ExpressionParser
-import com.sheets.services.expression.CircularDependencyDetector
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -23,9 +18,6 @@ class CellServiceImpl(
     private val cellRedisRepository: CellRedisRepository,
     private val cellAsyncService: CellAsyncService,
     private val cellDependencyService: CellDependencyService,
-    private val expressionParser: ExpressionParser,
-    private val expressionEvaluator: ExpressionEvaluator,
-    private val circularDependencyDetector: CircularDependencyDetector,
     private val cellLockService: CellLockService,
     private val primitiveDataProcessor: PrimitiveDataProcessor,
     private val expressionDataProcessor: ExpressionDataProcessor
@@ -129,6 +121,14 @@ class CellServiceImpl(
         logger.info("Deleting cell: {} by user: {}", id, userId)
         
         try {
+            // Check if the cell is used in any expressions (has dependencies)
+            val dependencies = cellDependencyService.getDependenciesByTargetCellId(id)
+            if (dependencies.isNotEmpty()) {
+                val dependentCellIds = dependencies.map { it.sourceCellId }
+                logger.warn("Cannot delete cell: {} as it is used in expressions in cells: {}", id, dependentCellIds)
+                throw IllegalStateException("Cannot delete cell as it is used in expressions in cells: ${dependentCellIds.joinToString(", ")}")
+            }
+            
             // Acquire lock on the cell
             if (!cellLockService.acquireLock(id, userId)) {
                 logger.warn("Failed to acquire lock on cell: {} for user: {}", id, userId)
@@ -174,10 +174,8 @@ class CellServiceImpl(
         val now = Instant.now()
         
         try {
-            // Process the expression
             val (dataType, evaluatedValue, dependencies) = expressionDataProcessor.processExpression(expression, sheetId, row, column)
             
-            // Update dependencies in the database
             logger.debug("Updating dependencies for cell: {}", cellId)
             cellDependencyService.deleteBySourceCellId(cellId)
             

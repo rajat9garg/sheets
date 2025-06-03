@@ -30,21 +30,32 @@ class ExpressionParserImpl : ExpressionParser {
         val numericMatcher = numericCellReferencePattern.matcher(trimmedExpression)
         while (numericMatcher.find()) {
             val cellRef = numericMatcher.group()
-            logger.info("Found numeric cell reference: {}", cellRef)
-            cellReferences.add(cellRef)
+
+            // Convert numeric reference to A1 notation
+            val parts = cellRef.split(":")
+            if (parts.size == 2) {
+                val row = parts[0]
+                val col = parts[1].toIntOrNull()
+                if (col != null) {
+                    val colLetter = numberToColumnLetter(col)
+                    val a1Ref = "$colLetter$row"
+                    cellReferences.add(a1Ref)
+                } else {
+                    cellReferences.add(cellRef)
+                }
+            } else {
+                cellReferences.add(cellRef)
+            }
         }
         
         // Find A1 notation cell references (A1, B2, etc.)
         val a1Matcher = a1CellReferencePattern.matcher(trimmedExpression)
         while (a1Matcher.find()) {
-            val colLetter = a1Matcher.group(1)
-            val row = a1Matcher.group(2)
-            val col = columnLetterToNumber(colLetter)
+            val a1Ref = a1Matcher.group()
+            logger.info("Found A1 notation cell reference: {}", a1Ref)
             
-            logger.info("Found A1 notation cell reference: {}{} -> {}:{}", colLetter, row, row, col)
-            
-            // Convert A1 notation to row:column format
-            cellReferences.add("$row:$col")
+            // Use A1 notation directly
+            cellReferences.add(a1Ref)
         }
         
         // Check for special variables like 'row' and 'column'
@@ -67,16 +78,33 @@ class ExpressionParserImpl : ExpressionParser {
                 if (argA1Matcher.matches()) {
                     val colLetter = argA1Matcher.group(1)
                     val row = argA1Matcher.group(2)
-                    val col = columnLetterToNumber(colLetter)
                     
-                    // Convert A1 notation to row:column format
-                    cellReferences.add("$row:$col")
+                    // Use A1 notation directly
+                    cellReferences.add("$colLetter$row")
                 }
                 
                 // Check if argument is a cell reference in numeric notation
                 val argNumericMatcher = numericCellReferencePattern.matcher(argTrimmed)
                 if (argNumericMatcher.matches()) {
-                    cellReferences.add(argTrimmed)
+                    val cellRef = argNumericMatcher.group()
+                    logger.info("Found numeric cell reference: {}", cellRef)
+                    
+                    // Convert numeric reference to A1 notation
+                    val parts = cellRef.split(":")
+                    if (parts.size == 2) {
+                        val row = parts[0]
+                        val col = parts[1].toIntOrNull()
+                        if (col != null) {
+                            val colLetter = numberToColumnLetter(col)
+                            val a1Ref = "$colLetter$row"
+                            logger.info("Converted numeric cell reference {}:{} to A1 notation: {}", row, col, a1Ref)
+                            cellReferences.add(a1Ref)
+                        } else {
+                            cellReferences.add(cellRef)
+                        }
+                    } else {
+                        cellReferences.add(cellRef)
+                    }
                 }
                 
                 // Check if argument is a range (e.g., A1:B5)
@@ -101,7 +129,8 @@ class ExpressionParserImpl : ExpressionParser {
                             // Add all cells in the range
                             for (row in startRow..endRow) {
                                 for (col in startCol..endCol) {
-                                    cellReferences.add("$row:$col")
+                                    val colLetter = numberToColumnLetter(col)
+                                    cellReferences.add("$colLetter$row")
                                 }
                             }
                         }
@@ -121,6 +150,17 @@ class ExpressionParserImpl : ExpressionParser {
         var result = 0
         for (c in column) {
             result = result * 26 + (c - 'A' + 1)
+        }
+        return result
+    }
+    
+    private fun numberToColumnLetter(number: Int): String {
+        var result = ""
+        var num = number
+        while (num > 0) {
+            val remainder = (num - 1) % 26
+            result = (remainder + 'A'.toInt()).toChar().toString() + result
+            num = (num - 1) / 26
         }
         return result
     }

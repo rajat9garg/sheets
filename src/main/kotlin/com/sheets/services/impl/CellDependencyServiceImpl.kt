@@ -309,22 +309,74 @@ class CellDependencyServiceImpl(
         context["sheetId"] = sheetId.toString()
         
         for (cellRef in cellReferences) {
-            val cellId = if (cellRef.contains(":")) {
-                "$sheetId:$cellRef"
-            } else {
+            // Handle A1 notation directly
+            if (!cellRef.contains(":")) {
                 val colLetter = cellRef.takeWhile { it.isLetter() }
                 val rowNum = cellRef.dropWhile { it.isLetter() }.toIntOrNull() ?: row
-                val colNum = colLetter.uppercase().fold(0) { acc, c -> acc * 26 + (c.code - 'A'.code + 1) }
-                "$sheetId:$rowNum:$colNum"
+                val cellId = "$sheetId:$rowNum:$colLetter"
+                
+                logger.debug("Looking up cell with ID: {} for reference: {}", cellId, cellRef)
+                val cell = cellRedisRepository.getCell(cellId)
+                if (cell != null) {
+                    logger.debug("Found cell: {}, value: {}", cellId, cell.evaluatedValue)
+                    context[cellRef] = cell.evaluatedValue
+                } else {
+                    logger.warn("Cell not found: {} for reference: {}", cellId, cellRef)
+                    context[cellRef] = "#REF!"
+                }
+            } else {
+                // Legacy format (row:col) - convert to A1 notation
+                val parts = cellRef.split(":")
+                if (parts.size == 2) {
+                    val rowNum = parts[0].toIntOrNull() ?: row
+                    val colNum = parts[1].toIntOrNull()
+                    
+                    if (colNum != null) {
+                        // Convert column number to letter
+                        val colLetter = numberToColumnLetter(colNum)
+                        val a1Ref = "$colLetter$rowNum"
+                        val cellId = "$sheetId:$rowNum:$colLetter"
+                        
+                        logger.debug("Looking up cell with ID: {} for reference: {} (A1: {})", cellId, cellRef, a1Ref)
+                        val cell = cellRedisRepository.getCell(cellId)
+                        if (cell != null) {
+                            logger.debug("Found cell: {}, value: {}", cellId, cell.evaluatedValue)
+                            context[cellRef] = cell.evaluatedValue
+                            // Also add the A1 reference to the context
+                            context[a1Ref] = cell.evaluatedValue
+                        } else {
+                            logger.warn("Cell not found: {} for reference: {}", cellId, cellRef)
+                            context[cellRef] = "#REF!"
+                            context[a1Ref] = "#REF!"
+                        }
+                    } else {
+                        // Invalid column number
+                        logger.warn("Invalid column number in cell reference: {}", cellRef)
+                        context[cellRef] = "#REF!"
+                    }
+                } else {
+                    // Invalid cell reference format
+                    logger.warn("Invalid cell reference format: {}", cellRef)
+                    context[cellRef] = "#REF!"
+                }
             }
-            
-            // Always get the latest value from Redis to ensure we have the most up-to-date data
-            val cell = cellRedisRepository.getCell(cellId)
-            context[cellRef] = cell?.evaluatedValue ?: "#REF!"
         }
         
         context["row"] = row.toString()
         
         return context
+    }
+    
+    private fun numberToColumnLetter(columnNumber: Int): String {
+        var dividend = columnNumber
+        var columnName = ""
+        
+        while (dividend > 0) {
+            val modulo = (dividend - 1) % 26
+            columnName = (modulo + 'A'.code).toChar() + columnName
+            dividend = (dividend - modulo) / 26
+        }
+        
+        return columnName
     }
 }

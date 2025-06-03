@@ -24,28 +24,14 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
             throw FunctionEvaluationException("SUM", "No arguments provided")
         }
         
-        // Extract the sheet ID from the context (last argument)
+        // Extract sheetId from the last argument if it's in the format "sheetId=X"
         var sheetId = 0L
-        val argsToProcess = args.toMutableList()
-        val sheetIdArg = argsToProcess.find { it.startsWith("sheetId=") }
-        
-        if (sheetIdArg != null) {
-            try {
-                val matcher = sheetIdPattern.matcher(sheetIdArg)
-                if (matcher.matches()) {
-                    sheetId = matcher.group(1).toLong()
-                    logger.info("Extracted sheetId: {} from context", sheetId)
-                    argsToProcess.remove(sheetIdArg)
-                }
-            } catch (e: Exception) {
-                logger.warn("Failed to extract sheetId from context: {}", e.message)
-            }
-        }
-        
-        // If we couldn't extract a sheet ID, log a warning
-        if (sheetId == 0L) {
-            logger.warn("No sheetId provided in context, using default")
-            sheetId = 14L // Default for backward compatibility, but this should be provided
+        val argsToProcess = if (args.last().startsWith("sheetId=")) {
+            sheetId = args.last().substring("sheetId=".length).toLong()
+            logger.info("SUM: Using sheetId: {}", sheetId)
+            args.dropLast(1)
+        } else {
+            args
         }
         
         var sum = 0.0
@@ -53,36 +39,6 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
         // Process all arguments except the last one if it contains sheetId
         for (arg in argsToProcess) {
             try {
-                // Check if the argument is a range in row:col-row:col format (e.g., 1:1-3:3)
-                val rangeMatcher = rangePattern.matcher(arg)
-                if (rangeMatcher.matches()) {
-                    val startRow = rangeMatcher.group(1).toInt()
-                    val startCol = rangeMatcher.group(2).toInt()
-                    val endRow = rangeMatcher.group(3).toInt()
-                    val endCol = rangeMatcher.group(4).toInt()
-                    sum += sumRange(startRow, startCol, endRow, endCol, sheetId)
-                    continue
-                }
-                
-                // Check if the argument is a cell reference in row:col format (e.g., 1:1)
-                val cellMatcher = cellReferencePattern.matcher(arg)
-                if (cellMatcher.matches()) {
-                    val row = cellMatcher.group(1).toInt()
-                    val col = cellMatcher.group(2).toInt()
-                    
-                    val cellId = "$sheetId:$row:$col"
-                    
-                    logger.info("SUM: Looking up cell with ID: {}", cellId)
-                    val cell = cellService.getCell(cellId)
-                    if (cell != null) {
-                        logger.info("SUM: Found cell: {}, value: {}", cellId, cell.evaluatedValue)
-                        sum += cell.evaluatedValue.toDoubleOrNull() ?: 0.0
-                    } else {
-                        logger.warn("SUM: Cell not found: {}", cellId)
-                    }
-                    continue
-                }
-                
                 // Check if the argument is a range in A1:B2 format
                 val a1RangeMatcher = a1RangePattern.matcher(arg)
                 if (a1RangeMatcher.matches()) {
@@ -96,13 +52,11 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                     if (startA1Matcher.matches() && endA1Matcher.matches()) {
                         val startColLetter = startA1Matcher.group(1)
                         val startRow = startA1Matcher.group(2).toInt()
-                        val startCol = columnLetterToNumber(startColLetter)
                         
                         val endColLetter = endA1Matcher.group(1)
                         val endRow = endA1Matcher.group(2).toInt()
-                        val endCol = columnLetterToNumber(endColLetter)
                         
-                        sum += sumRange(startRow, startCol, endRow, endCol, sheetId)
+                        sum += sumRangeA1(startRow, startColLetter, endRow, endColLetter, sheetId)
                         continue
                     }
                 }
@@ -112,15 +66,65 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                 if (a1CellMatcher.matches()) {
                     val colLetter = a1CellMatcher.group(1)
                     val row = a1CellMatcher.group(2).toInt()
-                    val col = columnLetterToNumber(colLetter)
                     
-                    val cellId = "$sheetId:$row:$col"
+                    val cellId = "$sheetId:$row:$colLetter"
                     
                     logger.info("SUM: Looking up cell with ID: {}", cellId)
                     val cell = cellService.getCell(cellId)
                     if (cell != null) {
                         logger.info("SUM: Found cell: {}, value: {}", cellId, cell.evaluatedValue)
-                        sum += cell.evaluatedValue.toDoubleOrNull() ?: 0.0
+                        val value = cell.evaluatedValue.toDoubleOrNull()
+                        if (value != null) {
+                            sum += value
+                            logger.info("SUM: Added value {} to sum, new sum: {}", value, sum)
+                        } else {
+                            logger.warn("SUM: Could not convert value '{}' to double", cell.evaluatedValue)
+                        }
+                    } else {
+                        logger.warn("SUM: Cell not found: {}", cellId)
+                    }
+                    continue
+                }
+                
+                // Check if the argument is a range in row:col-row:col format (e.g., 1:1-3:3)
+                // This is legacy format - convert to A1 notation
+                val rangeMatcher = rangePattern.matcher(arg)
+                if (rangeMatcher.matches()) {
+                    val startRow = rangeMatcher.group(1).toInt()
+                    val startCol = rangeMatcher.group(2).toInt()
+                    val endRow = rangeMatcher.group(3).toInt()
+                    val endCol = rangeMatcher.group(4).toInt()
+                    
+                    // Convert to A1 notation
+                    val startColLetter = numberToColumnLetter(startCol)
+                    val endColLetter = numberToColumnLetter(endCol)
+                    
+                    sum += sumRangeA1(startRow, startColLetter, endRow, endColLetter, sheetId)
+                    continue
+                }
+                
+                // Check if the argument is a cell reference in row:col format (e.g., 1:1)
+                // This is legacy format - convert to A1 notation
+                val cellMatcher = cellReferencePattern.matcher(arg)
+                if (cellMatcher.matches()) {
+                    val row = cellMatcher.group(1).toInt()
+                    val col = cellMatcher.group(2).toInt()
+                    
+                    // Convert column number to letter
+                    val colLetter = numberToColumnLetter(col)
+                    val cellId = "$sheetId:$row:$colLetter"
+                    
+                    logger.info("SUM: Looking up cell with ID: {}", cellId)
+                    val cell = cellService.getCell(cellId)
+                    if (cell != null) {
+                        logger.info("SUM: Found cell: {}, value: {}", cellId, cell.evaluatedValue)
+                        val value = cell.evaluatedValue.toDoubleOrNull()
+                        if (value != null) {
+                            sum += value
+                            logger.info("SUM: Added value {} to sum, new sum: {}", value, sum)
+                        } else {
+                            logger.warn("SUM: Could not convert value '{}' to double", cell.evaluatedValue)
+                        }
                     } else {
                         logger.warn("SUM: Cell not found: {}", cellId)
                     }
@@ -128,23 +132,31 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
                 }
                 
                 // If it's not a range or cell reference, treat it as a direct number
-                sum += arg.toDouble()
+                val numValue = arg.toDouble()
+                sum += numValue
+                logger.info("SUM: Added direct number {} to sum, new sum: {}", numValue, sum)
             } catch (e: NumberFormatException) {
+                logger.error("SUM: Invalid number format: {}", arg, e)
                 throw FunctionEvaluationException("SUM", "Invalid number format: $arg")
             } catch (e: Exception) {
+                logger.error("SUM: Error processing argument: {}", arg, e)
                 throw FunctionEvaluationException("SUM", "Error processing argument: $arg - ${e.message}")
             }
         }
         
+        logger.info("SUM: Final result: {}", sum)
         return sum.toString()
     }
     
-    private fun sumRange(startRow: Int, startCol: Int, endRow: Int, endCol: Int, sheetId: Long): Double {
+    private fun sumRangeA1(startRow: Int, startColLetter: String, endRow: Int, endColLetter: String, sheetId: Long): Double {
         var sum = 0.0
+        val startCol = columnLetterToNumber(startColLetter)
+        val endCol = columnLetterToNumber(endColLetter)
         
         for (row in startRow..endRow) {
             for (col in startCol..endCol) {
-                val cellId = "$sheetId:$row:$col"
+                val colLetter = numberToColumnLetter(col)
+                val cellId = "$sheetId:$row:$colLetter"
                 val cell = cellService.getCell(cellId)
                 if (cell != null) {
                     sum += cell.evaluatedValue.toDoubleOrNull() ?: 0.0
@@ -155,11 +167,24 @@ class SumFunction(private val cellService: CellService) : ExpressionFunction {
         return sum
     }
     
-    private fun columnLetterToNumber(column: String): Int {
+    private fun columnLetterToNumber(columnLetter: String): Int {
         var result = 0
-        for (c in column) {
+        for (c in columnLetter) {
             result = result * 26 + (c - 'A' + 1)
         }
         return result
+    }
+    
+    private fun numberToColumnLetter(columnNumber: Int): String {
+        var dividend = columnNumber
+        var columnName = ""
+        
+        while (dividend > 0) {
+            val modulo = (dividend - 1) % 26
+            columnName = (modulo + 'A'.code).toChar() + columnName
+            dividend = (dividend - modulo) / 26
+        }
+        
+        return columnName
     }
 }

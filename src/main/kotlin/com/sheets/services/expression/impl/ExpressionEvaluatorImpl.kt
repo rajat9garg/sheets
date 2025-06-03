@@ -110,14 +110,13 @@ class ExpressionEvaluatorImpl(
         if (a1Match != null) {
             val col = a1Match.groupValues[1]
             val row = a1Match.groupValues[2]
-            val numericCol = columnLetterToNumber(col)
-            val cellRef = "$row:$numericCol"
             
-            logger.info("Converting A1 reference {} to {}", arg, cellRef)
+            // Use the A1 reference directly since we now use alphabetical column names
+            logger.info("Processing A1 reference: {}", arg)
             
-            if (cellRef in context) {
-                logger.info("Found value for {}: {}", cellRef, context[cellRef])
-                return context[cellRef] ?: "0"
+            if (arg in context) {
+                logger.info("Found value for {}: {}", arg, context[arg])
+                return context[arg] ?: "0"
             }
         }
         
@@ -143,7 +142,7 @@ class ExpressionEvaluatorImpl(
         var processedExpression = expression
         
         logger.info("Evaluating arithmetic expression: {}", expression)
-        logger.info("Context: {}", context)
+        logger.debug("Context: {}", context)
         
         // Replace A1-style cell references with their values
         val a1Pattern = "([A-Z]+)(\\d+)".toRegex()
@@ -151,17 +150,13 @@ class ExpressionEvaluatorImpl(
         
         for (match in a1Matches) {
             val cellRef = match.value
-            val col = match.groupValues[1]
-            val row = match.groupValues[2]
-            val numericCol = columnLetterToNumber(col)
-            val numericRef = "$row:$numericCol"
             
-            if (numericRef in context) {
-                val value = context[numericRef] ?: "0"
-                logger.info("Replacing A1 reference {} ({}) with {}", cellRef, numericRef, value)
+            if (cellRef in context) {
+                val value = context[cellRef] ?: "0"
+                logger.info("Replacing A1 reference {} with {}", cellRef, value)
                 processedExpression = processedExpression.replace(cellRef, value)
             } else {
-                logger.warn("No value found for cell reference: {} ({})", cellRef, numericRef)
+                logger.warn("No value found for cell reference: {}", cellRef)
                 processedExpression = processedExpression.replace(cellRef, "0")
             }
         }
