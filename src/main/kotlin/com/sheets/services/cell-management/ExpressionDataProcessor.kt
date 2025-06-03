@@ -5,7 +5,6 @@ import com.sheets.models.domain.DataType
 import com.sheets.repositories.CellRedisRepository
 import com.sheets.services.CellAsyncService
 import com.sheets.services.CellDependencyService
-import com.sheets.services.CellLockService
 import com.sheets.services.expression.CircularDependencyDetector
 import com.sheets.services.expression.ExpressionEvaluator
 import com.sheets.services.expression.ExpressionParser
@@ -22,7 +21,6 @@ class ExpressionDataProcessor(
     private val cellRedisRepository: CellRedisRepository,
     private val cellAsyncService: CellAsyncService,
     private val cellDependencyService: CellDependencyService,
-    private val cellLockService: CellLockService,
     private val expressionParser: ExpressionParser,
     private val expressionEvaluator: ExpressionEvaluator,
     private val circularDependencyDetector: CircularDependencyDetector
@@ -41,42 +39,27 @@ class ExpressionDataProcessor(
             cell.column
         )
         
-        // Collect all cells that need to be locked
-        val cellsToLock = collectCellsToLock(cell.id, dependencies)
+        // Create the new cell
+        val newCell = cell.copy(
+            dataType = dataType,
+            evaluatedValue = evaluatedValue,
+            createdAt = timestamp,
+            updatedAt = timestamp
+        )
         
-        // Sort cells by ID to prevent deadlocks (consistent locking order)
-        val sortedCellsToLock = cellsToLock.distinct().sorted()
+        // Update dependencies
+        updateDependencies(cell.id, dependencies, cell.sheetId, timestamp)
         
-        // Acquire locks on all cells
-        if (!acquireLocks(sortedCellsToLock, userId)) {
-            throw IllegalStateException("Could not acquire locks for cell: ${cell.id}")
-        }
+        // Store the cell in Redis with TTL
+        logger.debug("Saving new expression cell to Redis: {}", newCell.id)
+        cellRedisRepository.saveCell(newCell)
         
-        try {
-            val newCell = cell.copy(
-                dataType = dataType,
-                evaluatedValue = evaluatedValue,
-                createdAt = timestamp,
-                updatedAt = timestamp
-            )
-            
-            // Update dependencies
-            updateDependencies(cell.id, dependencies, cell.sheetId, timestamp)
-            
-            // Store the cell in Redis with TTL
-            logger.debug("Saving new expression cell to Redis: {}", newCell.id)
-            cellRedisRepository.saveCell(newCell)
-            
-            // Save to MongoDB asynchronously
-            logger.debug("Saving new expression cell to MongoDB asynchronously: {}", newCell.id)
-            cellAsyncService.saveCell(newCell)
-            
-            logger.info("Successfully created expression cell: {} by user: {}", cell.id, userId)
-            return newCell
-        } finally {
-            // Release locks
-            releaseLocks(sortedCellsToLock, userId)
-        }
+        // Save to MongoDB asynchronously
+        logger.debug("Saving new expression cell to MongoDB asynchronously: {}", newCell.id)
+        cellAsyncService.saveCell(newCell)
+        
+        logger.info("Successfully created expression cell: {} by user: {}", cell.id, userId)
+        return newCell
     }
 
     /**
@@ -98,46 +81,30 @@ class ExpressionDataProcessor(
             newCellData.column
         )
         
-        // Collect all cells that need to be locked
-        val cellsToLock = collectCellsToLock(existingCell.id, dependencies)
+        // Update the cell
+        val updatedCell = existingCell.copy(
+            data = newCellData.data,
+            dataType = dataType,
+            evaluatedValue = evaluatedValue,
+            updatedAt = timestamp
+        )
         
-        // Sort cells by ID to prevent deadlocks (consistent locking order)
-        val sortedCellsToLock = cellsToLock.distinct().sorted()
+        // Update dependencies
+        updateDependencies(existingCell.id, dependencies, existingCell.sheetId, timestamp)
         
-        // Acquire locks on all cells
-        if (!acquireLocks(sortedCellsToLock, userId)) {
-            throw IllegalStateException("Could not acquire locks for cell: ${existingCell.id}")
-        }
+        // Persist the updated cell
+        logger.debug("Saving updated expression cell to Redis: {}", updatedCell.id)
+        cellRedisRepository.saveCell(updatedCell)
         
-        try {
-            // Update the cell
-            val updatedCell = existingCell.copy(
-                data = newCellData.data,
-                dataType = dataType,
-                evaluatedValue = evaluatedValue,
-                updatedAt = timestamp
-            )
-            
-            // Update dependencies
-            updateDependencies(existingCell.id, dependencies, existingCell.sheetId, timestamp)
-            
-            // Persist the updated cell
-            logger.debug("Saving updated expression cell to Redis: {}", updatedCell.id)
-            cellRedisRepository.saveCell(updatedCell)
-            
-            // Save to MongoDB asynchronously
-            logger.debug("Saving updated expression cell to MongoDB asynchronously: {}", updatedCell.id)
-            cellAsyncService.saveCell(updatedCell)
-            
-            // Update dependent cells
-            updateDependentCells(existingCell.id, userId)
-            
-            logger.info("Successfully updated expression cell: {} by user: {}", existingCell.id, userId)
-            return updatedCell
-        } finally {
-            // Release locks
-            releaseLocks(sortedCellsToLock, userId)
-        }
+        // Save to MongoDB asynchronously
+        logger.debug("Saving updated expression cell to MongoDB asynchronously: {}", updatedCell.id)
+        cellAsyncService.saveCell(updatedCell)
+        
+        // Update dependent cells
+        updateDependentCells(existingCell.id, userId)
+        
+        logger.info("Successfully updated expression cell: {} by user: {}", existingCell.id, userId)
+        return updatedCell
     }
 
 
@@ -279,36 +246,6 @@ class ExpressionDataProcessor(
         cellsToLock.addAll(dependentCells)
         
         return cellsToLock
-    }
-
-
-    private fun acquireLocks(cellIds: List<String>, userId: String): Boolean {
-        logger.debug("Attempting to acquire locks on {} cells", cellIds.size)
-        val lockedCells = mutableListOf<String>()
-        
-        for (cellId in cellIds) {
-            if (!cellLockService.acquireLock(cellId, userId)) {
-                // If we can't acquire a lock, release all locks we've acquired so far
-                logger.warn("Failed to acquire lock on cell: {} for user: {}", cellId, userId)
-                for (lockedCellId in lockedCells) {
-                    logger.debug("Releasing lock on cell: {} for user: {}", lockedCellId, userId)
-                    cellLockService.releaseLock(lockedCellId, userId)
-                }
-                return false
-            }
-            logger.debug("Acquired lock on cell: {} for user: {}", cellId, userId)
-            lockedCells.add(cellId)
-        }
-        
-        return true
-    }
-
-    private fun releaseLocks(lockedCells: List<String>, userId: String) {
-        logger.debug("Releasing all locks acquired for updating cells")
-        for (lockedCellId in lockedCells) {
-            logger.debug("Releasing lock on cell: {} for user: {}", lockedCellId, userId)
-            cellLockService.releaseLock(lockedCellId, userId)
-        }
     }
 
     private fun updateDependencies(cellId: String, dependencies: List<String>, sheetId: Long, timestamp: Instant) {

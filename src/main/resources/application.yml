@@ -16,18 +16,22 @@ spring:
     redis:
       host: localhost
       port: 6379
-      timeout: 2000
+      timeout: 5000
       database: 0
   redis:
     host: localhost
     port: 6379
     password: redispass
+    timeout: 5000
+    connect-timeout: 5000
     lettuce:
       pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 1
-        max-wait: -1ms
+        max-active: 16
+        max-idle: 16
+        min-idle: 4
+        max-wait: 2000ms
+        time-between-eviction-runs: 30000
+      shutdown-timeout: 3000ms
 # Logging
 logging:
   level:
@@ -35,3 +39,4 @@ logging:
     org:
       springframework: INFO
       jooq: INFO
+    io.lettuce: DEBUG

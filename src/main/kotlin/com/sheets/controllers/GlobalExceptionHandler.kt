@@ -1,6 +1,9 @@
 package com.sheets.controllers
 
 import com.sheets.generated.model.ErrorResponse
+import com.sheets.services.expression.exception.CircularDependencyException
+import com.sheets.services.expression.exception.ExpressionException
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -10,6 +13,8 @@ import java.time.OffsetDateTime
 
 @ControllerAdvice
 class GlobalExceptionHandler {
+    
+    private val logger = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
     @ExceptionHandler(NoSuchElementException::class)
     fun handleNoSuchElementException(ex: NoSuchElementException): ResponseEntity<ErrorResponse> {
@@ -53,9 +58,61 @@ class GlobalExceptionHandler {
         )
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse)
     }
+    
+    @ExceptionHandler(CircularDependencyException::class)
+    fun handleCircularDependencyException(ex: CircularDependencyException): ResponseEntity<ErrorResponse> {
+        logger.warn("Circular dependency detected: {}", ex.message)
+        val errorResponse = createErrorResponse(
+            HttpStatus.BAD_REQUEST.value(),
+            "Circular Dependency",
+            ex.message ?: "Circular dependency detected in cell references"
+        )
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .header("X-Error-Reason", "CIRCULAR_DEPENDENCY")
+            .body(errorResponse)
+    }
+    
+    @ExceptionHandler(ExpressionException::class)
+    fun handleExpressionException(ex: ExpressionException): ResponseEntity<ErrorResponse> {
+        logger.warn("Expression evaluation error: {}", ex.message)
+        val errorResponse = createErrorResponse(
+            HttpStatus.BAD_REQUEST.value(),
+            "Expression Error",
+            ex.message ?: "Error evaluating cell expression"
+        )
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse)
+    }
+    
+    @ExceptionHandler(IllegalStateException::class)
+    fun handleIllegalStateException(ex: IllegalStateException): ResponseEntity<ErrorResponse> {
+        logger.warn("Lock conflict or other illegal state: {}", ex.message)
+        
+        // Check if this is a lock conflict
+        if (ex.message?.contains("lock") == true || ex.message?.contains("Lock") == true) {
+            val errorResponse = createErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                "Resource Conflict",
+                ex.message ?: "Resource is locked by another user"
+            )
+            return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .header("X-Error-Reason", "RESOURCE_LOCKED")
+                .body(errorResponse)
+        }
+        
+        // For other illegal states
+        val errorResponse = createErrorResponse(
+            HttpStatus.CONFLICT.value(),
+            "Conflict",
+            ex.message ?: "Operation cannot be completed due to a conflict"
+        )
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse)
+    }
 
     @ExceptionHandler(Exception::class)
     fun handleGenericException(ex: Exception): ResponseEntity<ErrorResponse> {
+        logger.error("Unexpected error occurred", ex)
         val errorResponse = createErrorResponse(
             HttpStatus.INTERNAL_SERVER_ERROR.value(),
             "Internal Server Error",
